@@ -7,12 +7,12 @@
 4. Update `pi/REPORT.md` with results, commit and push
 
 ## What changed this iteration
-1. **ESP32: re-enabled scan response** — `enableScanResponse(true)` added back without the interval settings. This ensures the service UUID appears in scan response data. Only the interval settings (setMinInterval/setMaxInterval) broke things in Tests 6-8, not scan response itself.
-2. **Pi: match by name or MAC as fallback** — detection callback now matches by UUID, MAC address (`38:44:BE:45:AD:86`), or name (`BLE-Remote` or `EasyPlay`). This handles cases where the service UUID isn't in the advertisement data.
-3. **ESP32 flash erased and reflashed** — clean NVS state.
-4. **ESP32 confirmed running** with scan response enabled.
+1. **ESP32: periodic re-advertising every 30 seconds** — NimBLE was silently stopping advertising. The loop now calls `start()` every 30s as a safeguard.
+2. **ESP32: scan response enabled** — service UUID in scan response data.
+3. **Pi: name/MAC fallback matching** — already deployed last round.
+4. **ESP32 flash erased and reflashed** — clean state.
 
 ## Expected
-- Device should be found more reliably with name/MAC fallback
-- Service UUID should be in scan response data now
-- If connection times out: try `bluetoothctl connect 38:44:BE:45:AD:86` manually
+- ESP32 should stay discoverable even after long uptime
+- Device should be found by MAC, name, or UUID
+- If found → try to connect → report results

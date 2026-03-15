@@ -20,6 +20,7 @@ bool wasConnected = false;
 uint32_t heartbeatCounter = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastMemReport = 0;
+unsigned long lastAdvRestart = 0;
 unsigned long bootTime = 0;
 
 // Helper: milliseconds since boot as readable timestamp
@@ -194,11 +195,20 @@ void loop() {
         Serial.println("State: DISCONNECTED -> CONNECTED (counter reset)");
     }
 
+    // Re-start advertising every 30 seconds when not connected
+    // NimBLE may silently stop advertising — this ensures we stay discoverable
+    if (!deviceConnected && (now - lastAdvRestart >= 30000)) {
+        lastAdvRestart = now;
+        NimBLEDevice::getAdvertising()->start();
+        printTimestamp();
+        Serial.println("ADV: Re-started advertising (periodic refresh)");
+    }
+
     // Memory report every 10 seconds
     if (now - lastMemReport >= 10000) {
         lastMemReport = now;
         printTimestamp();
-        Serial.printf("STATUS: heap=%d bytes | connected=%s | heartbeats=%d\n",
+        Serial.printf("STATUS: heap=%d bytes | connected=%s | heartbeats=%d | adv_active\n",
             ESP.getFreeHeap(),
             deviceConnected ? "YES" : "NO",
             heartbeatCounter);
