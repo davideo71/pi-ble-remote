@@ -20,6 +20,7 @@ from bleak.exc import BleakError
 DEVICE_NAME = "BLE-Remote"
 SERVICE_UUID = "4e520001-7354-4288-9a71-81a9bf56c4a8"
 BUTTON_CHAR_UUID = "4e520002-7354-4288-9a71-81a9bf56c4a8"
+KNOWN_MAC = "38:44:BE:45:AD:86"  # ESP32-C3 BLE address (for pre-scan cache clearing)
 
 # Reconnection settings
 SCAN_TIMEOUT = 10.0        # seconds to scan before retrying
@@ -73,8 +74,9 @@ async def scan_for_device():
         log("Known address not found, falling back to service UUID scan", "WARN")
 
     # Remove stale BlueZ cache BEFORE scanning so the device is discovered fresh as LE
-    if connected_address:
-        await remove_bluez_device(connected_address)
+    # Always remove — BlueZ may have it cached as BR/EDR from old firmware ("EasyPlay")
+    addr_to_remove = connected_address or KNOWN_MAC
+    await remove_bluez_device(addr_to_remove)
 
     # Scan by service UUID (more reliable than name — BlueZ caches names)
     log(f"Scanning for service UUID {SERVICE_UUID} (timeout={SCAN_TIMEOUT}s)...")

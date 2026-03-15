@@ -7,14 +7,12 @@
 4. Update `pi/REPORT.md` with results, commit and push
 
 ## What changed this iteration
-1. **Stripped advertising config back to minimal** — removed `enableScanResponse(true)`, `setMinInterval`, and `setMaxInterval`. These were added in the last iteration and may have broken NimBLE 2.x advertising. Now using only `addServiceUUID()` + `start()`.
-2. **Full flash erase** before reflash — cleared all NVS/NimBLE state.
-3. **ESP32 confirmed running** — boot log shows correct BLE address, TX power 20 dBm, service UUID registered.
-
-## Key insight
-The ESP32 was visible in Tests 2-3-5 (old advertising config) but invisible in Tests 6-7-8 (after adding setMinInterval/setMaxInterval/enableScanResponse). Reverting to the minimal config that worked before.
+1. **Always remove BlueZ cache before scanning** — previously `remove_bluez_device()` was only called after a successful connection (which never happened). Now it always removes the known MAC `38:44:BE:45:AD:86` before every service UUID scan.
+2. **Root cause of connection timeout**: BlueZ still had the device cached as BR/EDR from old "EasyPlay" firmware. The name "EasyPlay" still appearing in Test 9 confirms the stale cache. By removing it before scanning, BlueZ will re-discover it as a fresh LE device.
+3. **No ESP32 firmware changes** — same minimal advertising config that works.
 
 ## Expected
-- Device should be visible again (like Tests 2-3-5)
-- If found → connect → heartbeat notifications should flow
-- If still not found: run `sudo hcitool lescan` for 10 seconds as a lower-level scan check
+- Device should be visible (like Test 9)
+- BlueZ cache removal should allow the connection to succeed this time
+- If connected → heartbeat notifications should flow (every 2 seconds)
+- ESP32 serial monitor is running — we can confirm if onConnect fires on the ESP32 side
