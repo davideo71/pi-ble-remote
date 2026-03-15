@@ -7,12 +7,11 @@
 4. Update `pi/REPORT.md` with results, commit and push
 
 ## What changed this iteration
-1. **Always remove BlueZ cache before scanning** — previously `remove_bluez_device()` was only called after a successful connection (which never happened). Now it always removes the known MAC `38:44:BE:45:AD:86` before every service UUID scan.
-2. **Root cause of connection timeout**: BlueZ still had the device cached as BR/EDR from old "EasyPlay" firmware. The name "EasyPlay" still appearing in Test 9 confirms the stale cache. By removing it before scanning, BlueZ will re-discover it as a fresh LE device.
-3. **No ESP32 firmware changes** — same minimal advertising config that works.
+1. **Removed `service_uuids` filter from BleakScanner** — Test 10 proved this D-Bus filter is unreliable and silently drops the ESP32. UUID matching is now done purely in the detection callback (which was already there).
+2. **No ESP32 firmware changes** — same minimal advertising config.
 
 ## Expected
-- Device should be visible (like Test 9)
-- BlueZ cache removal should allow the connection to succeed this time
-- If connected → heartbeat notifications should flow (every 2 seconds)
-- ESP32 serial monitor is running — we can confirm if onConnect fires on the ESP32 side
+- Device should be found reliably (unfiltered scan sees it consistently)
+- Connection should succeed (no more BR/EDR confusion, device discovered fresh as LE)
+- If connected → heartbeat notifications every 2 seconds
+- If connection still times out: try `bluetoothctl connect 38:44:BE:45:AD:86` manually and report the error

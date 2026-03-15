@@ -79,7 +79,7 @@ async def scan_for_device():
     await remove_bluez_device(addr_to_remove)
 
     # Scan by service UUID (more reliable than name — BlueZ caches names)
-    log(f"Scanning for service UUID {SERVICE_UUID} (timeout={SCAN_TIMEOUT}s)...")
+    log(f"Scanning for BLE devices (timeout={SCAN_TIMEOUT}s, matching UUID in callback)...")
 
     devices_found = 0
     target_device = None
@@ -98,10 +98,10 @@ async def scan_for_device():
         elif devices_found <= 10:
             log(f"  SCAN: {device.address} name={device.name!r} RSSI={advertisement_data.rssi}dBm", "DEBUG")
 
-    # service_uuids filter tells BlueZ to only report LE devices with our UUID
+    # No service_uuids filter — BlueZ D-Bus filter is unreliable with NimBLE's
+    # advertisement format. Instead we match by UUID in the detection callback above.
     scanner = BleakScanner(
         detection_callback=detection_callback,
-        service_uuids=[SERVICE_UUID],
     )
     await scanner.start()
     await asyncio.sleep(SCAN_TIMEOUT)
