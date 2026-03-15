@@ -88,14 +88,17 @@ async def scan_for_device():
         nonlocal devices_found, target_device
         devices_found += 1
 
-        # Log first 10 devices and any with our service UUID
+        # Match by service UUID, name, or known MAC address
         has_our_uuid = SERVICE_UUID in [str(u).lower() for u in advertisement_data.service_uuids]
+        is_our_mac = device.address and device.address.upper() == KNOWN_MAC
+        is_our_name = device.name in (DEVICE_NAME, "EasyPlay")  # EasyPlay = old cached name
 
-        if has_our_uuid:
-            log(f"  SCAN: ** MATCH ** {device.address} name={device.name!r} "
+        if has_our_uuid or is_our_mac or is_our_name:
+            match_reason = "UUID" if has_our_uuid else ("MAC" if is_our_mac else "name")
+            log(f"  SCAN: ** MATCH ({match_reason}) ** {device.address} name={device.name!r} "
                 f"RSSI={advertisement_data.rssi}dBm UUIDs={advertisement_data.service_uuids}", "DEBUG")
             target_device = device
-        elif devices_found <= 10:
+        elif devices_found <= 5:
             log(f"  SCAN: {device.address} name={device.name!r} RSSI={advertisement_data.rssi}dBm", "DEBUG")
 
     # No service_uuids filter — BlueZ D-Bus filter is unreliable with NimBLE's

@@ -149,13 +149,14 @@ void setup() {
     printTimestamp();
     Serial.println("Service started");
 
-    // Configure and start advertising — minimal config for reliability
+    // Configure and start advertising
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->enableScanResponse(true);  // Include service UUID in scan response
     pAdvertising->start();
 
     printTimestamp();
-    Serial.println("Advertising started (default interval, no scan response)");
+    Serial.println("Advertising started (default interval, scan response enabled)");
 
     printTimestamp();
     Serial.println("Advertising started - waiting for connections...");
