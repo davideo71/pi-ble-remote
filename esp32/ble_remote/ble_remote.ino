@@ -149,18 +149,13 @@ void setup() {
     printTimestamp();
     Serial.println("Service started");
 
-    // Configure and start advertising
+    // Configure and start advertising — minimal config for reliability
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
-    pAdvertising->enableScanResponse(true);
-    // Fast advertising interval: 20ms-100ms (default is much slower ~1.28s)
-    // This makes the device much more discoverable at the cost of power
-    pAdvertising->setMinInterval(0x20);  // 20ms (0x20 * 0.625ms)
-    pAdvertising->setMaxInterval(0xA0);  // 100ms (0xA0 * 0.625ms)
     pAdvertising->start();
 
     printTimestamp();
-    Serial.println("Advertising interval: 20-100ms (fast discovery mode)");
+    Serial.println("Advertising started (default interval, no scan response)");
 
     printTimestamp();
     Serial.println("Advertising started - waiting for connections...");
