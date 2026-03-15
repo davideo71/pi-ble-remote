@@ -68,7 +68,7 @@ async def scan_for_device():
             connected_address, timeout=SCAN_TIMEOUT / 2
         )
         if device:
-            log(f"Found by address: {device.name} ({device.address}) RSSI={device.rssi}dBm")
+            log(f"Found by address: {device.name} ({device.address})")
             return device
         log("Known address not found, falling back to name scan", "WARN")
 
@@ -81,7 +81,7 @@ async def scan_for_device():
         nonlocal devices_found
         devices_found += 1
         if devices_found <= 10 or (device.name and "BLE" in (device.name or "")):
-            log(f"  SCAN: {device.address} name={device.name!r} RSSI={device.rssi}dBm", "DEBUG")
+            log(f"  SCAN: {device.address} name={device.name!r} RSSI={advertisement_data.rssi}dBm", "DEBUG")
 
     scanner = BleakScanner(detection_callback=detection_callback)
     await scanner.start()
@@ -93,7 +93,7 @@ async def scan_for_device():
     # Find our device in results
     for d in scanner.discovered_devices:
         if d.name == DEVICE_NAME:
-            log(f"Found target: {d.name} ({d.address}) RSSI={d.rssi}dBm")
+            log(f"Found target: {d.name} ({d.address})")
             return d
 
     log(f"Device '{DEVICE_NAME}' not found in scan results", "WARN")
