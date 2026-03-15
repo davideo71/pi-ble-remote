@@ -118,7 +118,9 @@ void setup() {
     printTimestamp();
     Serial.println("Initializing NimBLE...");
     NimBLEDevice::init("BLE-Remote");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9);  // Max power for same-room use
+    NimBLEDevice::setPower(20);  // Max TX power: +20 dBm (NimBLE 2.x takes dBm directly)
+    printTimestamp();
+    Serial.printf("TX power set to: %d dBm\n", NimBLEDevice::getPower());
     printTimestamp();
     Serial.printf("BLE address: %s\n", NimBLEDevice::getAddress().toString().c_str());
 
@@ -150,8 +152,7 @@ void setup() {
     // Configure and start advertising
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
-    pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06);  // Suggest 7.5ms connection interval
+    pAdvertising->enableScanResponse(true);
     pAdvertising->start();
 
     printTimestamp();

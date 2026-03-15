@@ -2,25 +2,18 @@
 
 ## What to do
 1. `git pull` to get the latest code
-2. First, clear any remaining BlueZ cache for our device:
-   ```bash
-   bluetoothctl remove 38:44:BE:45:AD:86 2>/dev/null; true
-   ```
+2. Clear BlueZ cache: `bluetoothctl remove 38:44:BE:45:AD:86 2>/dev/null; true`
 3. Run `python3 pi/ble_receiver.py` for about 45 seconds
-4. The scanner now searches by **service UUID** instead of device name, which should bypass BlueZ name caching issues
-5. Update `pi/REPORT.md` with results, commit and push
+4. The scanner now searches by **service UUID** — look for `** MATCH **` lines in the output
+5. If it connects, let it run for ~20 seconds to capture heartbeat notifications
+6. Update `pi/REPORT.md` with results, commit and push
 
-## What changed
-- `ble_receiver.py` now scans by service UUID (`4e520001-...`) as primary match, falls back to name
-- The detection callback logs `** MATCH **` when it finds our service UUID in advertisements
-- If still not found, check whether the service UUID appears in `bluetoothctl` output:
-  ```bash
-  sudo btmon &
-  bluetoothctl scan le
-  ```
-  (run for ~15 seconds, look for UUID `4e520001` in the btmon output)
+## What changed this iteration
+- **Fixed TX power**: was passing old enum `ESP_PWR_LVL_P9` (value ~7) to NimBLE 2.x which takes dBm directly. Now set to **+20 dBm** (maximum). This should significantly improve RSSI (was -86 to -89 dBm at 1 meter!).
+- **Scanner uses service UUID**: bypasses BlueZ name caching entirely
+- ESP32 boot log now confirms: `TX power set to: 20 dBm`
 
-## Known state
-- ESP32-C3 MAC (BLE): `38:44:BE:45:AD:86`
-- ESP32-C3 is advertising with service UUID `4e520001-7354-4288-9a71-81a9bf56c4a8`
-- Signal was weak (-86 to -89 dBm) last test — try moving Pi and ESP32 closer if possible
+## Expected
+- RSSI should be much better (expect -40 to -60 dBm at 1 meter)
+- Service UUID match should trigger `** MATCH **` in scan output
+- If found, it should connect and start receiving heartbeat notifications
