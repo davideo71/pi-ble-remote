@@ -72,6 +72,10 @@ async def scan_for_device():
             return device
         log("Known address not found, falling back to service UUID scan", "WARN")
 
+    # Remove stale BlueZ cache BEFORE scanning so the device is discovered fresh as LE
+    if connected_address:
+        await remove_bluez_device(connected_address)
+
     # Scan by service UUID (more reliable than name — BlueZ caches names)
     log(f"Scanning for service UUID {SERVICE_UUID} (timeout={SCAN_TIMEOUT}s)...")
 
@@ -137,10 +141,9 @@ async def connect_and_listen(device):
 
     log(f"Connecting to {device.address} (timeout={CONNECT_TIMEOUT}s)...")
 
-    # Remove stale BlueZ cache entry to prevent BR/EDR connection attempt
-    await remove_bluez_device(device.address)
-
-    # Pass the BLEDevice object (not string!) to preserve LE context from scan
+    # Note: we no longer remove the BlueZ cache here — that destroys the D-Bus
+    # device object bleak needs. The service_uuids scanner filter already ensures
+    # BlueZ creates a proper LE device entry.
     async with BleakClient(
         device,
         disconnected_callback=disconnected_callback,
