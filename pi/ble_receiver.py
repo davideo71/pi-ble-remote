@@ -70,17 +70,26 @@ async def scan_for_device():
         if device:
             log(f"Found by address: {device.name} ({device.address})")
             return device
-        log("Known address not found, falling back to name scan", "WARN")
+        log("Known address not found, falling back to service UUID scan", "WARN")
 
-    # Scan by name
-    log(f"Scanning for device named '{DEVICE_NAME}' (timeout={SCAN_TIMEOUT}s)...")
+    # Scan by service UUID (more reliable than name — BlueZ caches names)
+    log(f"Scanning for service UUID {SERVICE_UUID} (timeout={SCAN_TIMEOUT}s)...")
 
     devices_found = 0
+    target_device = None
 
     def detection_callback(device, advertisement_data):
-        nonlocal devices_found
+        nonlocal devices_found, target_device
         devices_found += 1
-        if devices_found <= 10 or (device.name and "BLE" in (device.name or "")):
+
+        # Log first 10 devices and any with our service UUID
+        has_our_uuid = SERVICE_UUID in [str(u).lower() for u in advertisement_data.service_uuids]
+
+        if has_our_uuid:
+            log(f"  SCAN: ** MATCH ** {device.address} name={device.name!r} "
+                f"RSSI={advertisement_data.rssi}dBm UUIDs={advertisement_data.service_uuids}", "DEBUG")
+            target_device = device
+        elif devices_found <= 10:
             log(f"  SCAN: {device.address} name={device.name!r} RSSI={advertisement_data.rssi}dBm", "DEBUG")
 
     scanner = BleakScanner(detection_callback=detection_callback)
@@ -90,13 +99,17 @@ async def scan_for_device():
 
     log(f"Scan complete: {devices_found} devices seen")
 
-    # Find our device in results
+    if target_device:
+        log(f"Found target by service UUID: {target_device.name} ({target_device.address})")
+        return target_device
+
+    # Fallback: also check by name in case service UUID wasn't in advertisement
     for d in scanner.discovered_devices:
         if d.name == DEVICE_NAME:
-            log(f"Found target: {d.name} ({d.address})")
+            log(f"Found target by name: {d.name} ({d.address})")
             return d
 
-    log(f"Device '{DEVICE_NAME}' not found in scan results", "WARN")
+    log(f"Device not found (tried service UUID and name '{DEVICE_NAME}')", "WARN")
     return None
 
 

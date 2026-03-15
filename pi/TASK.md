@@ -2,16 +2,25 @@
 
 ## What to do
 1. `git pull` to get the latest code
-2. Run `python3 pi/ble_receiver.py` for about 30 seconds
-3. If "BLE-Remote" is still not found by name, also check if MAC `38:44:BE:45:AD:86` appears (that's our ESP32-C3's BLE address). The previous scan showed this MAC as "EasyPlay" — after a full flash erase and reflash it should now show as "BLE-Remote".
-4. If neither name nor MAC works, try a raw `bluetoothctl` scan to see what the Pi's BlueZ stack reports:
+2. First, clear any remaining BlueZ cache for our device:
    ```bash
-   bluetoothctl scan le
+   bluetoothctl remove 38:44:BE:45:AD:86 2>/dev/null; true
    ```
-   (run for ~10 seconds, then Ctrl+C)
-5. Update `pi/REPORT.md` with the new results, commit and push.
+3. Run `python3 pi/ble_receiver.py` for about 45 seconds
+4. The scanner now searches by **service UUID** instead of device name, which should bypass BlueZ name caching issues
+5. Update `pi/REPORT.md` with results, commit and push
 
 ## What changed
-- Full flash erase (`erase_flash`) was done to clear stale NVS data that was caching the old name "EasyPlay"
-- Firmware was reflashed — ESP32-C3 should now advertise as "BLE-Remote"
-- ESP32-C3 WiFi MAC: `38:44:BE:45:AD:84`, BLE MAC should be `38:44:BE:45:AD:86`
+- `ble_receiver.py` now scans by service UUID (`4e520001-...`) as primary match, falls back to name
+- The detection callback logs `** MATCH **` when it finds our service UUID in advertisements
+- If still not found, check whether the service UUID appears in `bluetoothctl` output:
+  ```bash
+  sudo btmon &
+  bluetoothctl scan le
+  ```
+  (run for ~15 seconds, look for UUID `4e520001` in the btmon output)
+
+## Known state
+- ESP32-C3 MAC (BLE): `38:44:BE:45:AD:86`
+- ESP32-C3 is advertising with service UUID `4e520001-7354-4288-9a71-81a9bf56c4a8`
+- Signal was weak (-86 to -89 dBm) last test — try moving Pi and ESP32 closer if possible
