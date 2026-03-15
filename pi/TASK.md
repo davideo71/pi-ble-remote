@@ -2,22 +2,16 @@
 
 ## What to do
 1. `git pull` to get the latest code
-2. Install dependencies: `pip install -r pi/requirements.txt`
-3. Run `python3 pi/ble_receiver.py` for about 30 seconds
-4. Capture the full terminal output
-5. Create a file `pi/REPORT.md` with:
-   - The full output from the receiver script
-   - Whether it found the "BLE-Remote" device
-   - Whether it connected and received heartbeat notifications
-   - Any errors or warnings
-   - Your BlueZ version (`bluetoothctl --version`)
-   - Python and bleak versions
-6. Commit and push the report:
+2. Run `python3 pi/ble_receiver.py` for about 30 seconds
+3. If "BLE-Remote" is still not found by name, also check if MAC `38:44:BE:45:AD:86` appears (that's our ESP32-C3's BLE address). The previous scan showed this MAC as "EasyPlay" — after a full flash erase and reflash it should now show as "BLE-Remote".
+4. If neither name nor MAC works, try a raw `bluetoothctl` scan to see what the Pi's BlueZ stack reports:
    ```bash
-   git add pi/REPORT.md
-   git commit -m "Pi test report: step 1 BLE connection test"
-   git push origin main
+   bluetoothctl scan le
    ```
+   (run for ~10 seconds, then Ctrl+C)
+5. Update `pi/REPORT.md` with the new results, commit and push.
 
-## Context
-The ESP32-C3 is flashed and advertising as "BLE-Remote" right now. It sends heartbeat notifications every 2 seconds. We want to verify the Pi can see it, connect, and receive data.
+## What changed
+- Full flash erase (`erase_flash`) was done to clear stale NVS data that was caching the old name "EasyPlay"
+- Firmware was reflashed — ESP32-C3 should now advertise as "BLE-Remote"
+- ESP32-C3 WiFi MAC: `38:44:BE:45:AD:84`, BLE MAC should be `38:44:BE:45:AD:86`
