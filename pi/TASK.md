@@ -2,22 +2,23 @@
 
 ## What to do
 1. `git pull` to get the latest code
-2. Clear BlueZ cache and reset adapter:
+2. Reset Bluetooth completely:
    ```bash
-   bluetoothctl remove 38:44:BE:45:AD:86 2>/dev/null; true
    sudo systemctl restart bluetooth
    sleep 2
+   bluetoothctl remove 38:44:BE:45:AD:86 2>/dev/null; true
    ```
 3. Run `python3 pi/ble_receiver.py` for about 60 seconds
 4. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration
-1. **TX power fixed to +20 dBm** (was ~7 dBm due to wrong enum). RSSI should be much better.
-2. **Connect by address string** instead of device object — avoids BlueZ trying BR/EDR (classic Bluetooth) transport. The `br-connection-canceled` error from test 3 was because BlueZ was trying a classic connection.
-3. **BlueZ stuck-state recovery** — when "InProgress" errors occur, the script now resets the Bluetooth adapter automatically (power off/on cycle).
+## What changed this iteration — CRITICAL FIXES
+1. **Root cause of `br-connection-canceled` found**: When BlueZ has a stale device cache entry (from old "EasyPlay" firmware), it tries BR/EDR instead of BLE. The ESP32-C3 only supports BLE, so the connection is immediately rejected.
+2. **Fix 1: Remove BlueZ cache before connect** — the script now calls `bluetoothctl remove <MAC>` before each connection attempt to force BlueZ to create a fresh LE device entry.
+3. **Fix 2: Pass BLEDevice object (not string)** — passing the `BLEDevice` from the scanner preserves the LE address type context. Passing a string address loses this and BlueZ defaults to BR/EDR.
+4. **Fix 3: Scanner uses `service_uuids` filter** — this tells BlueZ to only report LE devices advertising our service UUID, ensuring correct device type from the start.
+5. **TX power already at +20 dBm** from previous iteration.
 
 ## Expected
-- Much better RSSI (was -81 to -85 dBm, should be -40 to -60 dBm now)
-- Connection should succeed (no more br-connection-canceled)
-- Should see heartbeat notifications flowing
-- If BlueZ gets stuck, it should auto-recover
+- No more `br-connection-canceled` errors
+- Successful BLE connection with heartbeat notifications
+- If InProgress errors occur, the adapter auto-resets

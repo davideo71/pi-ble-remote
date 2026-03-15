@@ -92,7 +92,11 @@ async def scan_for_device():
         elif devices_found <= 10:
             log(f"  SCAN: {device.address} name={device.name!r} RSSI={advertisement_data.rssi}dBm", "DEBUG")
 
-    scanner = BleakScanner(detection_callback=detection_callback)
+    # service_uuids filter tells BlueZ to only report LE devices with our UUID
+    scanner = BleakScanner(
+        detection_callback=detection_callback,
+        service_uuids=[SERVICE_UUID],
+    )
     await scanner.start()
     await asyncio.sleep(SCAN_TIMEOUT)
     await scanner.stop()
@@ -113,15 +117,32 @@ async def scan_for_device():
     return None
 
 
+async def remove_bluez_device(address):
+    """Remove a device from BlueZ cache to force fresh LE connection."""
+    log(f"Removing {address} from BlueZ cache...")
+    result = subprocess.run(
+        ["bluetoothctl", "remove", address],
+        capture_output=True, text=True, timeout=5
+    )
+    if result.returncode == 0:
+        log(f"  Removed from BlueZ cache")
+    else:
+        log(f"  Not in cache (OK): {result.stderr.strip()}", "DEBUG")
+    await asyncio.sleep(0.5)
+
+
 async def connect_and_listen(device):
     """Connect to the device, subscribe, and listen until disconnect."""
     global connected_address
 
     log(f"Connecting to {device.address} (timeout={CONNECT_TIMEOUT}s)...")
-    log(f"  Using address type: public, forcing BLE transport")
 
+    # Remove stale BlueZ cache entry to prevent BR/EDR connection attempt
+    await remove_bluez_device(device.address)
+
+    # Pass the BLEDevice object (not string!) to preserve LE context from scan
     async with BleakClient(
-        device.address,
+        device,
         disconnected_callback=disconnected_callback,
         timeout=CONNECT_TIMEOUT,
     ) as client:
