@@ -9,7 +9,7 @@ Reconnects automatically on disconnect.
 
 import asyncio
 import struct
-import signal
+import subprocess
 import sys
 from datetime import datetime
 
@@ -118,9 +118,10 @@ async def connect_and_listen(device):
     global connected_address
 
     log(f"Connecting to {device.address} (timeout={CONNECT_TIMEOUT}s)...")
+    log(f"  Using address type: public, forcing BLE transport")
 
     async with BleakClient(
-        device,
+        device.address,
         disconnected_callback=disconnected_callback,
         timeout=CONNECT_TIMEOUT,
     ) as client:
@@ -151,6 +152,19 @@ async def connect_and_listen(device):
                 log(f"STATUS: connected={client.is_connected} mtu={client.mtu_size}")
 
     log("Connection closed (BleakClient exited)")
+
+
+async def reset_bluetooth_adapter():
+    """Reset the BlueZ adapter to recover from stuck states."""
+    log("Cycling Bluetooth adapter off/on...")
+    try:
+        subprocess.run(["bluetoothctl", "power", "off"], capture_output=True, timeout=5)
+        await asyncio.sleep(1)
+        subprocess.run(["bluetoothctl", "power", "on"], capture_output=True, timeout=5)
+        await asyncio.sleep(2)
+        log("Bluetooth adapter reset complete")
+    except Exception as e:
+        log(f"Adapter reset failed: {e}", "ERROR")
 
 
 async def main():
@@ -184,7 +198,11 @@ async def main():
             await connect_and_listen(device)
 
         except BleakError as e:
+            error_str = str(e)
             log(f"BLE error: {e}", "ERROR")
+            if "InProgress" in error_str or "in progress" in error_str.lower():
+                log("BlueZ stuck — resetting Bluetooth adapter...", "WARN")
+                await reset_bluetooth_adapter()
         except asyncio.TimeoutError:
             log("Connection timed out", "ERROR")
         except OSError as e:
