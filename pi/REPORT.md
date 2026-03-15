@@ -1,8 +1,8 @@
 # Pi Test Report: Step 1 BLE Connection Test
 
-## Test 5 — 2026-03-15 23:50 UTC (BR/EDR fix + cache removal + service UUID filter)
+## Test 6 — 2026-03-16 00:00 UTC (cache removal moved before scan)
 
-**Duration:** ~65 seconds
+**Duration:** ~90 seconds (6 scan cycles) + separate bluetoothctl scan
 
 ### Environment
 
@@ -11,41 +11,18 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: DEVICE FOUND, connection failed — `bluetoothctl remove` timing issue
+### Result: ESP32 NOT VISIBLE — appears to be offline
 
-**What worked:**
-- Bluetooth service restart cleared previous stuck state
-- Service UUID filter works perfectly — scanner only reports our device (1 device seen vs 50+ without filter)
-- Device found on scan cycle 3 at RSSI -81 dBm
-- No more `br-connection-canceled` or `InProgress` errors
+**0 devices seen** across all 6 scan cycles (~90 seconds total). The `service_uuids` filter is active, so only devices advertising our UUID would show up.
 
-**What failed:**
-The `bluetoothctl remove` is called BETWEEN scan and connect. This removes the BlueZ device entry that bleak just discovered, so the connect immediately fails:
+Verified with unfiltered `bluetoothctl scan le` (10 seconds) — MAC `38:44:BE:45:AD:86` was **not present** in the raw scan either. The ESP32 is not advertising at all right now.
 
-```
-[23:50:41.2879] [INFO ] Found target by service UUID: EasyPlay (38:44:BE:45:AD:86)
-[23:50:41.2880] [INFO ] Connecting to 38:44:BE:45:AD:86 (timeout=15.0s)...
-[23:50:41.2880] [INFO ] Removing 38:44:BE:45:AD:86 from BlueZ cache...
-[23:50:41.3080] [INFO ]   Removed from BlueZ cache
-[23:50:41.8137] [ERROR] BLE error: device 'dev_38_44_BE_45_AD_86' not found
-```
+### Analysis
 
-**Root cause:** `remove_bluez_device()` is called in `connect_and_listen()` right before `BleakClient()`. This destroys the D-Bus device object that bleak needs to initiate the connection. The BLEDevice Python object still exists but the underlying BlueZ device is gone.
-
-### Suggested fix
-
-Move the `bluetoothctl remove` to BEFORE the scan (not between scan and connect). This way:
-1. Remove stale cache entry (clears any old BR/EDR association)
-2. Scan discovers the device fresh (creates new LE device entry in BlueZ)
-3. Connect uses the fresh device entry
-
-Alternatively, skip the `bluetoothctl remove` entirely since the `service_uuids` filter already ensures BlueZ treats it as an LE device.
-
-### Other observations
-
-- **Name still "EasyPlay"** — the ESP32 is still advertising the old name despite flash erase. Check the NimBLE `init()` call in firmware.
-- **ESP32 appears intermittently** — 0 devices on scan cycles 1, 2, 4, 5; found on cycle 3 only
-- **RSSI -81 dBm** — better than before (-86 to -89), consistent with TX power increase
+- **The ESP32 appears to be offline or not advertising.** Previous tests showed it intermittently (1 out of 5 scans in Test 5, found on cycle 2 in Test 3). But now it's completely absent even from raw bluetoothctl scans.
+- **Could not test the cache removal fix** since the device never appeared.
+- **Possible causes:** ESP32 may have crashed, battery died, or is in a hung state. May need physical power cycle.
+- **Note on `service_uuids` filter:** When the filter is active, bleak reports 0 devices total (not 50+ like before). This is correct — BlueZ filters at the D-Bus level. However, this means we can't tell if the Pi's BLE stack is working. Consider logging the filter status or doing an occasional unfiltered scan as a health check.
 
 ### Full Output
 
@@ -54,43 +31,48 @@ Alternatively, skip the `bluetoothctl remove` entirely since the `service_uuids`
   BLE Remote Receiver - Raspberry Pi
   Step 1: Connection + Heartbeat Debug
 ============================================
-[23:50:03.6753] [INFO ] Target device: BLE-Remote
-[23:50:03.6753] [INFO ] Service UUID:  4e520001-7354-4288-9a71-81a9bf56c4a8
-[23:50:03.6754] [INFO ] Char UUID:     4e520002-7354-4288-9a71-81a9bf56c4a8
+[00:00:12.2223] [INFO ] Target device: BLE-Remote
+[00:00:12.2224] [INFO ] Service UUID:  4e520001-7354-4288-9a71-81a9bf56c4a8
+[00:00:12.2224] [INFO ] Char UUID:     4e520002-7354-4288-9a71-81a9bf56c4a8
 --------------------------------------------
 
-[23:50:03.6754] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
-[23:50:13.7318] [INFO ] Scan complete: 0 devices seen
-[23:50:13.7320] [WARN ] Device not found (tried service UUID and name 'BLE-Remote')
-[23:50:13.7320] [WARN ] Retrying in 3s...
-[23:50:16.7351] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
-[23:50:26.7600] [INFO ] Scan complete: 0 devices seen
-[23:50:26.7600] [WARN ] Device not found (tried service UUID and name 'BLE-Remote')
-[23:50:26.7600] [WARN ] Retrying in 4s...
-[23:50:31.2631] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
-[23:50:35.5112] [DEBUG]   SCAN: ** MATCH ** 38:44:BE:45:AD:86 name='EasyPlay' RSSI=-81dBm UUIDs=['4e520001-7354-4288-9a71-81a9bf56c4a8']
-[23:50:41.2879] [INFO ] Scan complete: 1 devices seen
-[23:50:41.2879] [INFO ] Found target by service UUID: EasyPlay (38:44:BE:45:AD:86)
-[23:50:41.2880] [INFO ] Connecting to 38:44:BE:45:AD:86 (timeout=15.0s)...
-[23:50:41.2880] [INFO ] Removing 38:44:BE:45:AD:86 from BlueZ cache...
-[23:50:41.3080] [INFO ]   Removed from BlueZ cache
-[23:50:41.8137] [ERROR] BLE error: device 'dev_38_44_BE_45_AD_86' not found
-[23:50:41.8138] [INFO ] Reconnecting in 3s...
-[23:50:44.8151] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
-[23:50:54.8420] [INFO ] Scan complete: 0 devices seen
-[23:50:54.8421] [WARN ] Device not found (tried service UUID and name 'BLE-Remote')
-[23:50:54.8421] [WARN ] Retrying in 3s...
-[23:50:57.8432] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
-[23:51:07.8681] [INFO ] Scan complete: 0 devices seen
-[23:51:07.8682] [WARN ] Device not found (tried service UUID and name 'BLE-Remote')
-[23:51:07.8682] [WARN ] Retrying in 4s...
+[00:00:12.2224] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
+[00:00:22.2715] [INFO ] Scan complete: 0 devices seen
+[00:00:22.2716] [WARN ] Device not found (tried service UUID and name 'BLE-Remote')
+[00:00:22.2716] [WARN ] Retrying in 3s...
+[00:00:25.2748] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
+[00:00:35.2995] [INFO ] Scan complete: 0 devices seen
+[00:00:35.2995] [WARN ] Device not found (tried service UUID and name 'BLE-Remote')
+[00:00:35.2996] [WARN ] Retrying in 4s...
+[00:00:39.8030] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
+[00:00:49.8298] [INFO ] Scan complete: 0 devices seen
+[00:00:49.8299] [WARN ] Device not found (tried service UUID and name 'BLE-Remote')
+[00:00:49.8299] [WARN ] Retrying in 7s...
+[00:00:56.5803] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
+[00:01:06.6083] [INFO ] Scan complete: 0 devices seen
+[00:01:06.6083] [WARN ] Device not found (tried service UUID and name 'BLE-Remote')
+[00:01:06.6083] [WARN ] Retrying in 10s...
+[00:01:16.7361] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
+[00:01:26.7702] [INFO ] Scan complete: 0 devices seen
+[00:01:26.7703] [WARN ] Device not found (tried service UUID and name 'BLE-Remote')
+[00:01:26.7704] [WARN ] Retrying in 15s...
+[00:01:41.7868] [INFO ] Scanning for service UUID 4e520001-7354-4288-9a71-81a9bf56c4a8 (timeout=10.0s)...
+(timed out during cycle 6)
+```
+
+### bluetoothctl verification
+
+```bash
+bluetoothctl --timeout 10 scan le | grep "38:44:BE:45:AD:86"
+# (no output — device not present)
 ```
 
 ---
 
 ## Previous Tests
 
-### Test 4 (23:24) — BlueZ stuck, ESP32 not visible after adapter reset
-### Test 3 (23:18) — Device found by UUID (3 hits), connection failed with br-connection-canceled, BlueZ stuck
+### Test 5 (23:50) — Device found by UUID, but bluetoothctl remove between scan/connect destroyed BlueZ entry
+### Test 4 (23:24) — BlueZ stuck (InProgress), fixed with adapter reset, ESP32 not visible after
+### Test 3 (23:18) — Device found by UUID (3 hits, -81 dBm), connection failed with br-connection-canceled
 ### Test 2 (23:12) — MAC found, name cached as "EasyPlay", cache cleared
 ### Test 1 (23:00) — Initial test, fixed bleak 2.x .rssi compat bug
