@@ -1,8 +1,8 @@
 # Pi Test Report: Step 1 BLE Connection Test
 
-## Test 11 — 2026-03-16 00:40 UTC (removed service_uuids filter)
+## Test 12 — 2026-03-16 00:50 UTC (scan response re-enabled + name/MAC fallback)
 
-**Duration:** ~90s receiver + 15s + 20s unfiltered scans
+**Duration:** ~90 seconds (5 scan cycles)
 
 ### Environment
 
@@ -11,59 +11,55 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: ESP32 NOT VISIBLE — intermittency problem
+### Result: ESP32 NOT ADVERTISING
 
-**Receiver (unfiltered, 5 scan cycles, 90s):** 46-51 devices per cycle, no `** MATCH **` lines. The ESP32 MAC `38:44:BE:45:AD:86` did not appear at all, and no service UUID match triggered.
+5 scan cycles, 45-54 devices each, **MAC `38:44:BE:45:AD:86` did not appear at all**. The callback now matches by UUID, MAC, or name ("BLE-Remote"/"EasyPlay") — none triggered.
 
-**Additional unfiltered scans (15s + 20s):** ESP32 not found. 88 detection callbacks in the 20s scan, none for our MAC or "EasyPlay".
+### Verified: Pi-side code is correct
 
-### Key observation: service UUID may not be in advertisement data
+The detection callback (lines 87-102 of `ble_receiver.py`) matches by:
+- Service UUID in `advertisement_data.service_uuids`
+- MAC address `38:44:BE:45:AD:86`
+- Name `BLE-Remote` or `EasyPlay`
 
-The receiver was scanning unfiltered and matching by UUID in the callback (`advertisement_data.service_uuids`). Even if the device WAS seen (which it wasn't this time), the service UUID might not be in the advertisement data — it could be in the scan response only, or not included at all with the minimal advertising config.
+None of these matched because the device simply isn't present in any scan.
 
-**Previous evidence:**
-- Test 10 (5 minutes earlier): unfiltered `BleakScanner.discover()` found it as "EasyPlay"
-- Test 9 (15 minutes earlier): filtered scan found it with UUID 3 times
-- Now: completely absent
+### The pattern is clear: ESP32 advertising is unreliable
 
-### The intermittency pattern
+| Test | Time | Visible? | Notes |
+|------|------|----------|-------|
+| 1 | 23:00 | No | First test, no ESP32 |
+| 2 | 23:12 | **Yes** | By MAC, cached name |
+| 3 | 23:18 | **Yes** | By UUID (3 hits) |
+| 5 | 23:50 | **Yes** | By UUID (1 hit) |
+| 6-8 | 00:00-00:18 | No | Broken adv config |
+| 9 | 00:29 | **Yes** | After minimal config revert (3/5 scans) |
+| 10 | 00:34 | **Yes** (unfiltered only) | Filter was the issue |
+| 11 | 00:40 | No | Intermittent |
+| 12 | 00:50 | No | After reflash with scan response |
 
-| Test | Time gap | ESP32 visible? |
-|------|----------|---------------|
-| 3 | 23:18 | Yes (3 hits) |
-| 5 | 23:50 | Yes (1 hit) |
-| 9 | 00:29 | Yes (3 hits) |
-| 10 unfiltered | 00:37 | Yes (1 hit) |
-| 11 | 00:40 | No |
-
-The ESP32 seems to advertise in bursts with long gaps. With the minimal config, the default NimBLE advertising interval is ~1280ms (1.28 seconds). The device should appear multiple times in a 10-second scan window.
-
-### Possible causes
-
-1. **ESP32 stops advertising after a while** — NimBLE might stop advertising after a timeout or connection attempt
-2. **NimBLE advertising needs `setScanResponse(true)`** — without scan response enabled, the service UUID may only appear intermittently in advertising packets
-3. **ESP32 crash/hang** — it may be crashing silently and only advertising briefly after reboot
-4. **Power issue** — unstable power causing intermittent radio operation
+The ESP32 works for ~20-30 minutes after a fresh flash, then stops advertising. This suggests:
+1. **NimBLE stops advertising after some internal timeout or error**
+2. **Memory leak or stack overflow** causing crash
+3. **Watchdog reset** that doesn't restart advertising properly
 
 ### Suggestion
 
-- **Check ESP32 serial output RIGHT NOW** — is it still printing status messages? If the serial output stopped, it crashed.
-- **Add `setScanResponse(true)` back** — but without the interval settings that broke it in Tests 6-8. The scan response is needed to reliably include the service UUID.
-- **Consider matching by name AND MAC as fallback** — don't rely solely on service UUID in advertisement data
+- **Check ESP32 serial monitor** — is the heap shrinking? Are there any error messages? Is it still printing heartbeat status?
+- **Add a periodic re-start of advertising** in the ESP32 loop as a safety measure
+- **Add watchdog reset logging** to detect silent crashes
+- **Consider a simpler test**: use `NimBLEAdvertising::start()` in the loop every 30 seconds to force re-advertising
 
 ---
 
 ## Previous Tests Summary
 
-| Test | Time | Result |
-|------|------|--------|
-| 11 | 00:40 | Not found (unfiltered, 5 cycles + 2 extra scans) |
-| 10 | 00:34 | Filtered: not found. Unfiltered: FOUND. |
-| 9 | 00:29 | Visible (3/5 scans), connection timeout |
-| 8 | 00:18 | Not visible (broken adv config) |
-| 7 | 00:10 | Not visible (broken adv config) |
-| 6 | 00:00 | Not visible (broken adv config) |
-| 5 | 23:50 | Found, bluetoothctl remove broke connect |
-| 3 | 23:18 | Found (3 hits), br-connection-canceled |
-| 2 | 23:12 | MAC found as "EasyPlay" |
-| 1 | 23:00 | Fixed bleak .rssi bug |
+| Test | Result |
+|------|--------|
+| 12 (00:50) | Not found — ESP32 stopped advertising |
+| 11 (00:40) | Not found — intermittent |
+| 10 (00:34) | Found unfiltered, filter was unreliable |
+| 9 (00:29) | Found 3/5 scans, connection timeout |
+| 6-8 | Not found — broken adv config |
+| 3-5 | Found — connection issues (BR/EDR, cache, timeout) |
+| 1-2 | Initial tests, bleak bug fixed |
