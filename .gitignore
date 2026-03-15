@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ESP32 / Arduino
+.pio/
+.vscode/
+build/
+
+# MicroPython
+*.mpy
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+*.swp
+*.swo
+.idea/
+
+# Environment
+.env
