@@ -3,17 +3,15 @@
 ## What to do
 1. `git pull` to get the latest code
 2. Reset Bluetooth: `sudo systemctl restart bluetooth && sleep 2`
-3. Run `python3 pi/ble_receiver.py` for about 60-90 seconds (device appears intermittently)
+3. Run `python3 pi/ble_receiver.py` for about 60-90 seconds
 4. Update `pi/REPORT.md` with results, commit and push
 
 ## What changed this iteration
-1. **Moved `bluetoothctl remove` from between scan/connect to BEFORE the scan** — Test 5 showed that removing the BlueZ device after scanning destroyed the D-Bus object bleak needed. Now we clear stale cache first, then scan discovers the device fresh as LE.
-2. **Only removes cache on reconnect** (when we have a known address) — first scan runs without cache removal.
-3. **service_uuids filter confirmed working** — only our device shows up in scans.
-
-## Known issues
-- ESP32 appears intermittently (only 1 out of 5 scan cycles in test 5). If it doesn't appear, let it run longer.
-- Name still shows as "EasyPlay" — cosmetic, doesn't affect functionality since we match by UUID.
+1. **ESP32 advertising interval dramatically reduced**: from default ~1280ms to 20-100ms. This means the ESP32 sends advertising packets 10-60x more frequently, making it much more discoverable. This should fix the intermittent visibility issue (only 1 out of 5 scans found it before).
+2. ESP32 was power-cycled via reflash — clean BLE stack state.
+3. No changes to the Pi receiver code (the cache timing fix from last round is still in place).
 
 ## Expected
-- Device found by UUID scan → connect succeeds → heartbeat notifications flow
+- Device should appear in nearly every scan cycle now (not 1 out of 5)
+- RSSI should be similar (~-81 dBm) but discovery much more reliable
+- If found → connect → heartbeat notifications should flow
