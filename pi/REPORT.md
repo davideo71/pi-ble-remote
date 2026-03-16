@@ -1,8 +1,8 @@
 # Pi Test Report: Step 1 BLE Connection Test
 
-## Test 14 — 2026-03-16 22:30 UTC (relaxed connection parameters — supervision timeout fix)
+## Test 15 — 2026-03-16 22:42 UTC (optimized connection and reconnection speed)
 
-**Duration:** ~4 minutes (240 second timeout)
+**Duration:** 2 runs, ~60 seconds each
 
 ### Environment
 
@@ -11,48 +11,47 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: FULL SUCCESS — Stable connection for 3m41s, 110 heartbeats, zero drops
+### Result: REGRESSION — Discovery fast, but ALL connections timeout
 
-#### Discovery
-- ESP32 found by UUID — **6 matches** during 10-second scan
-- RSSI: **steady -87 dBm** (very consistent, no variation)
-- Active scanning + adapter reset working as expected
+#### What works: Discovery + early exit scan
+- Early exit scan works perfectly — device found in **<1 second** on first match
+- First scan in Run 1: found as **device #1** (instant!)
+- Subsequent scans: found in 1-8 devices, typically under 2 seconds
+- RSSI: steady -87 dBm (consistent with Test 13-14)
+- UUID matching reliable, MAC fallback also works
 
-#### Connection (22:30:37 — 22:34:18, entire test duration)
-- Connected in ~5 seconds
-- **Single connection held for 3 minutes 41 seconds** — no disconnects
-- **110 consecutive heartbeats** (#3 through #112), every ~2 seconds, **zero gaps**
-- MTU: 23 (default)
-- Status checks every 5 seconds all reported connected=True
-- Connection was still alive when the 240-second timeout killed the test
+#### What's broken: Connections timeout every time
+- **Run 1:** 3 connection attempts, ALL timed out after 10-14 seconds
+- **Run 2:** 3+ connection attempts, ALL timed out
+- 0 successful connections across both runs
+- Pattern: device found → connect attempt → ~10s timeout → DISCONNECTED callback fires → repeat
+
+This is a **regression from Test 14** where connections worked perfectly (3m41s stable).
+
+#### Additional issue: Adapter reset too fast
+- The 1.5s adapter reset (0.5s off + 1.0s on) is not always enough
+- Got "No powered Bluetooth adapters found" errors when scanning immediately after reset
+- The old 3s timing (1s off + 2s on) was more reliable
+
+### Analysis
+
+The ESP32 firmware is **unchanged** from Test 14. Only Pi-side code changed. Possible causes:
+
+1. **Faster adapter reset (1.5s) may leave BlueZ in a half-initialized state** — the adapter reports as powered but the LE subsystem isn't fully ready, causing connection to fail silently.
+
+2. **`bluetoothctl remove` before every scan may be too aggressive** — in Test 14, the remove only happened on first scan (no cached address). Now it happens every time the full scan path runs, which is after every failed connection.
+
+3. **The quick scan path (3s address-based, no adapter reset) never succeeded** — always fell through to full scan. Possibly because BlueZ needs the reset to see the device after a disconnect/timeout.
 
 ### Answers to key questions
 
-1. **Do connections survive past the 25-27 second mark?** YES — the connection ran for **3 min 41 sec** with no sign of dropping. The relaxed supervision timeout (6s vs default ~2s) completely fixed the disconnect issue.
+1. **How long from script start to first heartbeat?** N/A — connections never succeeded.
+2. **How long from restart to first heartbeat?** N/A — same issue.
+3. **Does the connection stay stable?** N/A — couldn't connect.
 
-2. **Do heartbeats arrive consistently on every connection?** YES — 110 consecutive heartbeats with no gaps. The "Connection 2 no heartbeats" issue from Test 13 did not recur.
+### Suggestion
 
-3. **Does auto-reconnect still work?** Not tested — the connection never dropped, so auto-reconnect was not triggered. This is a good problem to have.
-
-### Comparison across tests
-
-| Metric | Test 9 | Test 13 | Test 14 |
-|--------|--------|---------|---------|
-| Discovery | 3/5 scans | 16 matches | 6 matches |
-| RSSI | -81 to -88 | -87 to -91 | -87 steady |
-| Connection | Timeout | 3x ~25s drops | **Stable 3m41s** |
-| Heartbeats | None | 2/3 sessions | **110 consecutive** |
-| Disconnects | N/A | 3 in 2 min | **0 in 4 min** |
-
-### Step 1 status: COMPLETE
-
-The BLE connection between ESP32-C3 and Raspberry Pi is now **reliable and stable**:
-- Discovery is consistent (UUID-based, active scanning)
-- Connection survives well beyond the initial 25-second issue
-- Heartbeat notifications arrive every ~2 seconds without gaps
-- The auto-reconnect infrastructure exists but wasn't needed
-
-**Ready for Step 2:** GPIO button handling on the ESP32 + button-to-action mapping on the Pi.
+Revert the adapter reset timing to 3s (1s off + 2s on) — the 1.5s timing causes "no adapter" errors. Keep the early exit scan (it's a clear win for discovery speed). The connection timeout issue may also be related to insufficient reset time before the connect attempt.
 
 ---
 
@@ -60,6 +59,7 @@ The BLE connection between ESP32-C3 and Raspberry Pi is now **reliable and stabl
 
 | Test | Result |
 |------|--------|
+| 15 (22:42) | **REGRESSION** — fast discovery but all connections timeout. Adapter reset too fast. |
 | 14 (22:30) | **FULL SUCCESS** — stable 3m41s connection, 110 heartbeats, zero drops |
 | 13 (22:24) | Reliable discovery (16 hits), 3 connections, heartbeats received, disconnects at ~25s |
 | 12 (00:50) | Not found — ESP32 stopped advertising |
