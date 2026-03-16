@@ -5,19 +5,20 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 19)
-**Skip scanning on reconnect — connect directly by MAC.** Test 18 was perfect (9s cold start, first-attempt success). Now optimizing reconnection speed. When the Pi has previously connected, it skips scanning entirely and connects directly to the known MAC address using `connect_and_listen_by_address()`.
+## What changed this iteration (Test 20)
+**Pre-emptive adapter reset on reconnect.** Test 19 showed the direct-MAC reconnect works but BlueZ "InProgress" error blocks it until an adapter reset. Now the adapter reset happens immediately at the start of `connect_and_listen_by_address()` so it's built into the reconnect path instead of being an extra retry.
+
+Reconnect flow is now: adapter reset (3.2s) → direct connect by MAC (no scan) → subscribe.
 
 ## Test procedure
-1. Let it connect normally (cold start, will scan as usual)
-2. Once connected and receiving heartbeats, **power-cycle the ESP32** (unplug and replug USB) to force a disconnect
-3. Watch the reconnection — it should skip scanning and connect directly by MAC
-4. Log how long the reconnection takes
+1. Let it connect normally (cold start)
+2. Once receiving heartbeats, wait for a natural disconnect OR I may reset the ESP32 via serial
+3. Measure reconnection time
 
 ## Expected
-- Cold start: ~9 seconds (same as Test 18)
-- **Reconnection after disconnect: ~4-5 seconds** (no scan, no adapter reset — just direct connect)
-- Stable connection once established
+- Cold start: ~9-18 seconds (same as before)
+- **Reconnection: ~5-8 seconds** (3.2s reset + connect, no scan)
+- No "InProgress" errors on reconnect
 
 ## Key question
-How fast is reconnection after a disconnect? (Compare cold start vs reconnect timing)
+How fast is reconnection now? Does the pre-emptive reset avoid the InProgress error?

@@ -159,6 +159,11 @@ async def connect_and_listen_by_address(address):
     """Connect directly by MAC address (skip scanning). Used for reconnection."""
     global connected_address
 
+    # Pre-emptive adapter reset: BlueZ throws "InProgress" after a disconnect
+    # unless the adapter is cycled first. Do it here so it's part of the
+    # reconnect path rather than an extra retry loop.
+    await reset_bluetooth_adapter()
+
     log(f"Connecting to {address} by address (timeout={CONNECT_TIMEOUT}s)...")
 
     async with BleakClient(
