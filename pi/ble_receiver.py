@@ -28,8 +28,8 @@ CONNECT_TIMEOUT = 15.0     # seconds to wait for connection (10s caused early ti
 RECONNECT_DELAY = 1.0      # seconds between reconnection attempts (fast!)
 MAX_RECONNECT_DELAY = 10.0 # max backoff delay
 
-# State
-connected_address = None   # Remember MAC for faster reconnect
+# State — pre-seed with known MAC so direct-connect works from first run
+connected_address = KNOWN_MAC
 
 
 def ts():
@@ -233,16 +233,16 @@ async def connect_and_listen(device):
 async def reset_bluetooth_adapter():
     """Reset the BlueZ adapter to recover from stuck states.
 
-    Timing: 1s off + 2s on = 3s total. Faster resets (1.5s) caused
-    "No powered Bluetooth adapters found" — BlueZ LE subsystem needs
-    the full 2s after power-on to initialize properly.
+    Timing: 1s off + 3s on = 4s total. 2s on-wait was marginal and
+    intermittently caused "No powered Bluetooth adapters found" —
+    BlueZ LE subsystem needs the full 3s after power-on.
     """
     log("Cycling Bluetooth adapter off/on...")
     try:
         subprocess.run(["bluetoothctl", "power", "off"], capture_output=True, timeout=5)
         await asyncio.sleep(1)
         subprocess.run(["bluetoothctl", "power", "on"], capture_output=True, timeout=5)
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
         log("Bluetooth adapter reset complete")
     except Exception as e:
         log(f"Adapter reset failed: {e}", "ERROR")
