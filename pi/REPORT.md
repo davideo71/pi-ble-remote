@@ -1,8 +1,8 @@
 # Pi Test Report: Step 1 BLE Connection Test
 
-## Test 12 — 2026-03-16 00:50 UTC (scan response re-enabled + name/MAC fallback)
+## Test 13 — 2026-03-16 22:24 UTC (reduced TX power + fast advertising + adapter reset)
 
-**Duration:** ~90 seconds (5 scan cycles)
+**Duration:** ~120 seconds (3 connection cycles)
 
 ### Environment
 
@@ -11,44 +11,67 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: ESP32 NOT ADVERTISING
+### Result: SUCCESS — Discovery reliable, connection works, heartbeats received!
 
-5 scan cycles, 45-54 devices each, **MAC `38:44:BE:45:AD:86` did not appear at all**. The callback now matches by UUID, MAC, or name ("BLE-Remote"/"EasyPlay") — none triggered.
+#### Discovery
+- ESP32 found **immediately** by UUID — **16 matches** during a single 10-second scan
+- RSSI: **-87 to -91 dBm** (slightly weaker than -81 to -88 at +20 dBm, but far more consistent)
+- Active scanning worked — service UUID appeared in every advertisement
+- Adapter reset before scan added ~3 seconds delay (acceptable)
+- Device name still shows as "EasyPlay" (BlueZ cache), not "BLE-Remote"
 
-### Verified: Pi-side code is correct
+#### Connection 1 (22:24:40 - 22:25:06)
+- Connected in ~2.3 seconds
+- **Received heartbeats #2 through #13** (~2 second intervals, as expected)
+- MTU: 23 (default)
+- Custom service `4e520001-...` discovered with notify characteristic
+- **Disconnected after ~26 seconds** (unexpected)
 
-The detection callback (lines 87-102 of `ble_receiver.py`) matches by:
-- Service UUID in `advertisement_data.service_uuids`
-- MAC address `38:44:BE:45:AD:86`
-- Name `BLE-Remote` or `EasyPlay`
+#### Reconnection 1 → Connection 2 (22:25:22 - 22:25:50)
+- BlueZ threw "InProgress" error after disconnect — adapter reset recovered it
+- Reconnected via cached MAC address (fast path, ~2 seconds)
+- Connected and subscribed successfully
+- **No heartbeat notifications received** despite being connected ~27 seconds
+- Status checks showed connection was alive (is_connected=True)
+- **Disconnected after ~27 seconds**
 
-None of these matched because the device simply isn't present in any scan.
+#### Reconnection 2 → Connection 3 (22:26:07 - timeout at 22:26:24)
+- Same InProgress → adapter reset → reconnect pattern
+- **Received heartbeats #2 through #9** (counter reset on each new connection)
+- Connection still alive when test timed out at 120 seconds
 
-### The pattern is clear: ESP32 advertising is unreliable
+### Key findings
 
-| Test | Time | Visible? | Notes |
-|------|------|----------|-------|
-| 1 | 23:00 | No | First test, no ESP32 |
-| 2 | 23:12 | **Yes** | By MAC, cached name |
-| 3 | 23:18 | **Yes** | By UUID (3 hits) |
-| 5 | 23:50 | **Yes** | By UUID (1 hit) |
-| 6-8 | 00:00-00:18 | No | Broken adv config |
-| 9 | 00:29 | **Yes** | After minimal config revert (3/5 scans) |
-| 10 | 00:34 | **Yes** (unfiltered only) | Filter was the issue |
-| 11 | 00:40 | No | Intermittent |
-| 12 | 00:50 | No | After reflash with scan response |
+| Metric | Test 9 (best before) | Test 13 |
+|--------|---------------------|---------|
+| Discovery | 3/5 scans | 16/16 matches in 1 scan |
+| RSSI | -81 to -88 dBm | -87 to -91 dBm |
+| Connection | Timeout (failed) | Success (3 connects) |
+| Heartbeats | None | Received (2x sessions) |
+| Auto-reconnect | N/A | Works (with adapter reset) |
 
-The ESP32 works for ~20-30 minutes after a fresh flash, then stops advertising. This suggests:
-1. **NimBLE stops advertising after some internal timeout or error**
-2. **Memory leak or stack overflow** causing crash
-3. **Watchdog reset** that doesn't restart advertising properly
+### Issues to investigate
 
-### Suggestion
+1. **Connections drop after ~25-27 seconds** — all three connections terminated at roughly the same interval. This could be:
+   - ESP32 supervision timeout set too low
+   - NimBLE connection parameter mismatch
+   - BlueZ connection parameter negotiation failure
 
-- **Check ESP32 serial monitor** — is the heap shrinking? Are there any error messages? Is it still printing heartbeat status?
-- **Add a periodic re-start of advertising** in the ESP32 loop as a safety measure
-- **Add watchdog reset logging** to detect silent crashes
-- **Consider a simpler test**: use `NimBLEAdvertising::start()` in the loop every 30 seconds to force re-advertising
+2. **Connection 2 had no heartbeat notifications** — subscribed successfully but no data arrived. The ESP32 heartbeat counter likely reset and the notification may not have been re-enabled on the ESP32 side.
+
+3. **BlueZ "InProgress" after every disconnect** — consistent pattern. The adapter reset workaround is reliable but adds ~6 seconds to reconnection.
+
+4. **Device name "EasyPlay"** — BlueZ is caching the old name. The ESP32 firmware should set the name to "BLE-Remote" but BlueZ ignores the update. Low priority.
+
+### Answer to key question
+
+**Does the ESP32 show up consistently?** YES — the combination of lower TX power (+9 dBm), fast advertising (20-60ms), and adapter reset before scan made discovery **completely reliable**. 16 UUID matches in a single 10-second scan is excellent.
+
+### Suggested next steps
+
+1. **Fix the ~25s disconnect** — check ESP32 `NimBLEServer::onDisconnect()` logs and connection supervision timeout setting. Consider setting `BLE_GAP_INITIAL_SUPERVISION_TIMEOUT` higher.
+2. **Ensure notifications survive reconnect** — the heartbeat task on ESP32 may need to re-check notification subscription state after a new connection.
+3. **Consider longer connection intervals** on the ESP32 to reduce radio contention (currently likely using NimBLE defaults).
 
 ---
 
@@ -56,6 +79,7 @@ The ESP32 works for ~20-30 minutes after a fresh flash, then stops advertising. 
 
 | Test | Result |
 |------|--------|
+| 13 (22:24) | **SUCCESS** — reliable discovery (16 hits), 3 connections, heartbeats received, disconnects at ~25s |
 | 12 (00:50) | Not found — ESP32 stopped advertising |
 | 11 (00:40) | Not found — intermittent |
 | 10 (00:34) | Found unfiltered, filter was unreliable |
