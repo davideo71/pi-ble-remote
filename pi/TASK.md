@@ -6,19 +6,13 @@
 3. Update `pi/REPORT.md` with results, commit and push
 
 ## What changed this iteration (Test 29)
-The code now has TWO key fixes that may not have been in effect for Test 28 (git timing):
-
-1. **`connected_address = None` on startup** — forces scan-based discovery on first connection (not direct-connect by MAC). This was the root cause of "Device not found" errors.
-2. **`systemctl restart bluetooth` runs automatically at script startup** — built into the Python script now.
-
-Also: ESP32 was removed from the protoboard (buttons disconnected) in case the wiring was causing hardware interference.
+**ESP32: 5-second grace period after connection before sending notifications.** Test 28b showed the ESP32 drops connections during GATT service discovery. The simulated button notifications were firing immediately on connect, before the Pi finished subscribing. Now the ESP32 waits 5 seconds after connection before sending any notifications (buttons or heartbeat).
 
 ## Expected
-- Script restarts bluetooth service automatically
-- Scan finds the ESP32 (like Tests 13-18)
-- Connection succeeds on first or second attempt
-- Simulated button events arrive (L, R, U, D, O cycling)
-- Heartbeats every 2s
+- Scan-based discovery finds ESP32
+- Connection holds through GATT discovery (no more drops)
+- After 5s grace period: simulated button events + heartbeats arrive
+- Stable connection
 
 ## Key question
-Does scan-based first connection work? Do simulated button events arrive?
+Does the 5s grace period fix the connection drops during GATT discovery?

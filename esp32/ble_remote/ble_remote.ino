@@ -42,6 +42,8 @@ bool deviceConnected = false;
 bool wasConnected = false;
 uint32_t heartbeatCounter = 0;
 unsigned long lastHeartbeat = 0;
+unsigned long connectedSince = 0;  // When connection was established
+#define NOTIFY_GRACE_PERIOD 5000   // Wait 5s after connect before sending notifications
 unsigned long lastMemReport = 0;
 unsigned long lastAdvRestart = 0;
 unsigned long bootTime = 0;
@@ -214,10 +216,11 @@ void loop() {
     }
 
     // ---- Simulated button presses for testing (cycle all 5 buttons every 5s) ----
+    // Wait for grace period after connect to let GATT discovery complete
     static unsigned long lastSimButton = 0;
     static int simButtonIndex = 0;
     static bool simPressed = false;
-    if (deviceConnected && (now - lastSimButton >= 500)) {
+    if (deviceConnected && (now - connectedSince >= NOTIFY_GRACE_PERIOD) && (now - lastSimButton >= 500)) {
         lastSimButton = now;
         if (!simPressed) {
             // Send press
@@ -232,7 +235,7 @@ void loop() {
     }
 
     // ---- Heartbeat every 2s (keeps connection alive, useful for monitoring) ----
-    if (deviceConnected && (now - lastHeartbeat >= 2000)) {
+    if (deviceConnected && (now - connectedSince >= NOTIFY_GRACE_PERIOD) && (now - lastHeartbeat >= 2000)) {
         lastHeartbeat = now;
         heartbeatCounter++;
 
@@ -255,8 +258,9 @@ void loop() {
     if (!wasConnected && deviceConnected) {
         wasConnected = true;
         heartbeatCounter = 0;
+        connectedSince = now;
         printTimestamp();
-        Serial.println("State: DISCONNECTED -> CONNECTED (counter reset)");
+        Serial.printf("State: DISCONNECTED -> CONNECTED (counter reset, notifications in %dms)\n", NOTIFY_GRACE_PERIOD);
     }
 
     // Re-start advertising every 30 seconds when not connected
