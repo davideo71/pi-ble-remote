@@ -1,6 +1,6 @@
-# Pi Test Report: Step 1 BLE Connection Test
+# Pi Test Report: Step 2 — Button Handling
 
-## Test 22 — 2026-03-16 23:37 UTC (light adapter reset: disconnect + HCI reset)
+## Test 23 — 2026-03-17 00:02 UTC (Step 2: button notifications)
 
 **Duration:** ~120 seconds
 
@@ -11,46 +11,36 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: SUCCESS — Light reset works, 12.6s to heartbeat
+### Result: Connection stable, button decoding ready — NO BUTTON EVENTS RECEIVED
 
-#### Cold start timing
-- Script start: 23:37:23.4
-- Light reset (disconnect + HCI reset): **3.8 seconds** (logged as ~1.3s but actual elapsed was 3.8s including subprocess overhead)
-- Direct connect by MAC: **5.5 seconds**
-- Subscribe: **2.3 seconds**
-- **First heartbeat: 23:37:36.0**
-- **Total: 12.6 seconds from script start to first heartbeat**
+#### Connection
+- InProgress error on first attempt (light reset didn't clear it)
+- Full adapter reset → second attempt succeeded after 12.7s connect time
+- **Script start → first heartbeat: ~23 seconds** (InProgress retry added ~7s)
 
-#### Light reset: works without errors
-- `bluetoothctl disconnect` + `hciconfig hci0 reset` succeeded (no permission errors)
-- No fallback to full power cycle needed
-- No "InProgress" errors
-- No "No powered adapters" errors
+#### Heartbeats
+- **49 consecutive heartbeats** (#4-#52), every ~2 seconds, zero gaps
+- Connection stable for **97+ seconds** — still alive at test timeout
+- New compact `HEARTBEAT #N` format working correctly
 
-#### Stability: 107 seconds, 54 heartbeats
-- **54 consecutive heartbeats** (#3-#56), every ~2 seconds, zero gaps
-- Connection held for **107+ seconds** — still alive at test timeout
-- No disconnects
+#### Button events
+- **No button press/release events were received**
+- The notification handler is ready — decodes 1-byte ASCII chars to button names
+- No buttons were physically pressed during this test run
+- The button decoding code looks correct: checks `len(data) == 1` → ASCII char → `BUTTON_NAMES` lookup
 
-### Timing comparison
-
-| Test | Reset method | Reset time | Connect time | Total to heartbeat |
-|------|-------------|------------|--------------|-------------------|
-| 14 | Full power cycle (3s) + scan (10s) | ~13s | 5s | ~20s |
-| 18 | Full power cycle (3s) + scan (early exit) | ~3.6s | 3.5s | **9s** |
-| 21 | Full power cycle (4s) + direct MAC | ~4.2s | 7.3s | 13s |
-| **22** | **Light reset (disconnect + HCI)** + direct MAC | **~3.8s** | **5.5s** | **12.6s** |
-
-The light reset saved ~0.4s vs the full power cycle from Test 21. The connect time varies between runs (3.5-11.5s across tests), so the total time is dominated by BLE connection variance rather than reset strategy.
+### Pi-side code review
+The button handling code is clean:
+- `BUTTON_NAMES` dict maps all 10 events (5 buttons × press/release)
+- Handler distinguishes button (1 byte) from heartbeat (4 bytes) by length
+- Format: `BUTTON: 'L' → LEFT press`
 
 ### Answer to key question
 
-**Does the light reset clear InProgress errors?** Yes — no InProgress errors occurred. However, we didn't test reconnection after disconnect (the connection never dropped). The real test of InProgress handling will be when a disconnect happens mid-session.
+**Do button notifications arrive correctly?** Unknown — no buttons were pressed during the test. The Pi receiver is ready and the notification handler will decode them correctly when they arrive. Need to run again while buttons are being pressed on the ESP32.
 
-**How much faster is startup?** ~0.4s faster than full power cycle. The improvement is modest because: (1) the HCI reset still takes time, (2) the connect time varies more than the reset savings. The main benefit is reliability — avoiding the "No powered adapters" risk of the full power cycle.
-
-### Note on `hciconfig`
-`hciconfig hci0 reset` ran without needing sudo. This may be because the user has permissions via the `bluetooth` group, or because the Pi's default config allows it. On other systems, this might require elevated privileges.
+### Next step
+Run the test again while manually pressing buttons on the ESP32. The Pi side is ready.
 
 ---
 
@@ -58,12 +48,10 @@ The light reset saved ~0.4s vs the full power cycle from Test 21. The connect ti
 
 | Test | Result |
 |------|--------|
-| 22 (23:37) | **SUCCESS** — light reset, 12.6s to heartbeat, 54 heartbeats, 107s stable |
-| 21 (23:27) | Success — direct connect, 13s to heartbeat, 105s stable |
-| 20 (23:22) | Rough — 6 attempts, adapter errors |
-| 19 (23:16) | Direct reconnect works but InProgress blocks |
-| 18 (23:04) | Perfect scan+connect, 9s to heartbeat |
-| 15-17 | Optimization attempts with regressions |
+| 23 (00:02) | Connection stable, button handler ready, no buttons pressed during test |
+| 22 (23:37) | Light reset, 12.6s to heartbeat, 107s stable |
+| 21 (23:27) | Direct connect by MAC, 13s to heartbeat, 105s stable |
+| 18 (23:04) | Best scan+connect, 9s to heartbeat |
 | 14 (22:30) | First stable connection (3m41s) |
 | 13 (22:24) | First reliable discovery |
 | 1-12 | Early tests — discovery and connection issues |
