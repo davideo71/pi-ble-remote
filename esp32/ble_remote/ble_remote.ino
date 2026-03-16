@@ -154,10 +154,14 @@ void setup() {
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->enableScanResponse(true);  // Include service UUID in scan response
+    // Fast advertising interval for reliable discovery (esp. with weak C3 antenna)
+    // Units are 0.625ms: 0x20 = 20ms, 0x60 = 60ms
+    pAdvertising->setMinInterval(0x20);  // 20ms
+    pAdvertising->setMaxInterval(0x60);  // 60ms  (was 0xA0=100ms, trying tighter)
     pAdvertising->start();
 
     printTimestamp();
-    Serial.println("Advertising started (default interval, scan response enabled)");
+    Serial.println("Advertising started (20-60ms interval, scan response enabled)");
 
     printTimestamp();
     Serial.println("Advertising started - waiting for connections...");

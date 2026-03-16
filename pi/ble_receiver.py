@@ -78,6 +78,13 @@ async def scan_for_device():
     addr_to_remove = connected_address or KNOWN_MAC
     await remove_bluez_device(addr_to_remove)
 
+    # Reset the Bluetooth adapter before each scan to clear BlueZ's internal
+    # duplicate filter. Without this, BlueZ may suppress advertisements from
+    # devices it has already seen in this adapter session, even if they were
+    # removed from the cache above. This is the "surgical" version of the full
+    # systemctl restart — we just cycle power on the adapter via bluetoothctl.
+    await reset_bluetooth_adapter()
+
     # Scan by service UUID (more reliable than name — BlueZ caches names)
     log(f"Scanning for BLE devices (timeout={SCAN_TIMEOUT}s, matching UUID in callback)...")
 
@@ -103,8 +110,11 @@ async def scan_for_device():
 
     # No service_uuids filter — BlueZ D-Bus filter is unreliable with NimBLE's
     # advertisement format. Instead we match by UUID in the detection callback above.
+    # Active scanning sends scan requests, which triggers the ESP32's scan response
+    # containing the service UUID — critical for discovery.
     scanner = BleakScanner(
         detection_callback=detection_callback,
+        scanning_mode="active",
     )
     await scanner.start()
     await asyncio.sleep(SCAN_TIMEOUT)
