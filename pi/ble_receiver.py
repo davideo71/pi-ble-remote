@@ -159,10 +159,10 @@ async def connect_and_listen_by_address(address):
     """Connect directly by MAC address (skip scanning). Used for reconnection."""
     global connected_address
 
-    # Pre-emptive adapter reset: BlueZ throws "InProgress" after a disconnect
-    # unless the adapter is cycled first. Do it here so it's part of the
-    # reconnect path rather than an extra retry loop.
-    await reset_bluetooth_adapter()
+    # Light cleanup: disconnect + brief wait instead of full adapter power cycle.
+    # BlueZ throws "InProgress" if it still thinks a connection is active.
+    # A targeted disconnect + hci reset should clear that without the 4s overhead.
+    await light_reset(address)
 
     log(f"Connecting to {address} by address (timeout={CONNECT_TIMEOUT}s)...")
 
@@ -228,6 +228,31 @@ async def connect_and_listen(device):
                 log(f"STATUS: connected={client.is_connected} mtu={client.mtu_size}")
 
     log("Connection closed (BleakClient exited)")
+
+
+async def light_reset(address):
+    """Light reset: disconnect device + HCI reset instead of full power cycle.
+
+    Step 2: bluetoothctl disconnect — clears BlueZ connection state
+    Step 3: hciconfig hci0 reset — HCI-level reset (what EasyPlay uses)
+    Should clear InProgress errors in ~1-2s instead of 4s.
+    """
+    log(f"Light reset: disconnecting {address} + HCI reset...")
+    try:
+        subprocess.run(
+            ["bluetoothctl", "disconnect", address],
+            capture_output=True, text=True, timeout=5
+        )
+        await asyncio.sleep(0.3)
+        subprocess.run(
+            ["hciconfig", "hci0", "reset"],
+            capture_output=True, text=True, timeout=5
+        )
+        await asyncio.sleep(1.0)
+        log("Light reset complete (~1.3s)")
+    except Exception as e:
+        log(f"Light reset failed: {e}, falling back to full reset", "WARN")
+        await reset_bluetooth_adapter()
 
 
 async def reset_bluetooth_adapter():
