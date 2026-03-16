@@ -195,14 +195,16 @@ async def connect_and_listen(device):
 async def reset_bluetooth_adapter():
     """Reset the BlueZ adapter to recover from stuck states.
 
-    Tightened timing: 0.5s off + 1s on = ~1.5s total (was 3s).
+    Timing: 1s off + 2s on = 3s total. Faster resets (1.5s) caused
+    "No powered Bluetooth adapters found" — BlueZ LE subsystem needs
+    the full 2s after power-on to initialize properly.
     """
     log("Cycling Bluetooth adapter off/on...")
     try:
         subprocess.run(["bluetoothctl", "power", "off"], capture_output=True, timeout=5)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
         subprocess.run(["bluetoothctl", "power", "on"], capture_output=True, timeout=5)
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(2)
         log("Bluetooth adapter reset complete")
     except Exception as e:
         log(f"Adapter reset failed: {e}", "ERROR")
