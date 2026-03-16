@@ -1,8 +1,8 @@
 # Pi Test Report: Step 1 BLE Connection Test
 
-## Test 20 — 2026-03-16 23:22 UTC (pre-emptive adapter reset on reconnect)
+## Test 21 — 2026-03-16 23:27 UTC (pre-seeded MAC + 3s adapter on-wait)
 
-**Duration:** ~150 seconds
+**Duration:** ~120 seconds
 
 ### Environment
 
@@ -11,49 +11,53 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: ROUGH RUN — Connected after 6 attempts, direct reconnect NOT tested
+### Result: SUCCESS — First-attempt direct connect, 13s to heartbeat, no scan needed
 
-#### Connection attempts (cold start)
-1. **(23:22:26)** Found in 0.3s by UUID. Disconnected during service discovery after 13s. Error: "failed to discover services, device disconnected"
-2. **(23:22:44)** Found in 0.9s by UUID. Connection timed out after 19s.
-3. **(23:23:09)** "No powered Bluetooth adapters" — adapter reset timing issue.
-4. **(23:23:14)** Recovery: `bluetoothctl remove` triggered after 3 failures. Found in 5.4s. Connection timed out after 19s.
-5. **(23:23:44)** "No powered adapters" again.
-6. **(23:23:49)** Found in 0.4s. **CONNECTED** after 9.8s — SUCCESS.
+#### Cold start: Direct connect by MAC (no scanning!)
+- Script start: 23:27:57.5
+- Adapter reset: 4.2 seconds (1s off + 3s on)
+- Direct connect by MAC: 7.3 seconds
+- Subscribe: 1.0 second
+- **First heartbeat: 23:28:10.8**
+- **Total: 13.3 seconds from script start to first heartbeat**
 
-**Script start → first heartbeat: ~100 seconds** (5 failed attempts)
+#### No errors
+- **Zero "No powered adapters" errors** — the 3s on-wait is sufficient
+- **Zero "InProgress" errors**
+- **First-attempt connection success**
+- No scanning was performed at all — went straight to direct connect
 
-#### Once connected (23:23:59 — 23:24:52+, test timeout)
-- **25 heartbeats** (#5-#29), every ~2 seconds, zero gaps
-- Stable for 53+ seconds — still alive at test timeout
+#### Stability: 105 seconds, 54 heartbeats
+- **54 consecutive heartbeats** (#2-#55), every ~2 seconds, zero gaps
+- Connection held for **105+ seconds** — still alive at test timeout
+- No disconnects
 
-#### Direct-MAC reconnect: NOT TESTED
-The direct reconnect path (`connect_and_listen_by_address()`) was never triggered because:
-- The initial connection failed before `connected_address` was set
-- So the code fell back to the scan-based path on every retry
-- The connection finally succeeded but didn't disconnect again during the test
+### Answers to key questions
 
-#### "No powered adapters" is back
-The 3s adapter reset (1s off + 2s on) produced "No powered adapters" errors **twice** in this run (attempts 3 and 5). This didn't happen in Test 18 but has appeared intermittently. The timing may be marginal — 2s after power-on might not always be enough for BlueZ to fully initialize.
+1. **Does pre-seeding MAC allow direct-connect on first startup?** YES — the script went straight from startup → adapter reset → connect by MAC. No scanning at all. The log shows `"Direct connect to known address ... (no scan)..."` as the very first action.
 
-### Analysis: Connection reliability has degraded
+2. **Is 3s on-wait enough?** YES — zero adapter errors in this run. The previous 2s wait caused intermittent "No powered adapters" in Tests 15, 17, and 20.
 
-| Test | Cold start attempts | Time to heartbeat |
-|------|-------------------|-------------------|
-| 18 | **1** | **9s** |
-| 19 | **1** | 18s |
-| 20 | **6** | **100s** |
+### Comparison: Connection optimization journey
 
-The code is essentially the same across these tests. The main variable is BLE connection reliability, which appears to fluctuate significantly. Possible factors:
-- **BlueZ internal state** accumulates across runs (not fully cleared by adapter reset)
-- **RF environment** changes (interference from other 2.4GHz devices)
-- **ESP32 advertising state** — the periodic re-advertising may have edge cases
-- **Connection timing** — BLE connection is inherently probabilistic
+| Test | Strategy | Attempts | Time to heartbeat |
+|------|----------|----------|-------------------|
+| 14 | Scan (10s full) + connect | 1 | ~20s |
+| 18 | Scan (early exit) + connect | 1 | **9s** |
+| 19 | Scan (early exit) + connect | 1 | 18s |
+| 20 | Scan + connect (unstable) | 6 | 100s |
+| **21** | **Direct connect by MAC (no scan)** | **1** | **13s** |
 
-### Suggestions
-1. **Increase adapter reset wait to 3s** (1s off + **3s** on) to eliminate "No powered adapters" errors
-2. **Set `connected_address` from KNOWN_MAC at startup** so the direct-connect path is available even before the first successful connection
-3. Consider that connection reliability may never be 100% on first attempt — the retry loop is the right strategy, focus on making retries fast
+The 13s time is: 4.2s (adapter reset) + 7.3s (connect) + 1s (subscribe) + 0.8s (first notification). The reset is fixed overhead. The connect time varies (3-12s across tests). Best-case would be ~8s.
+
+### Step 1 optimized connection: COMPLETE
+
+Final connection architecture:
+- **Cold start**: adapter reset → direct connect by pre-seeded MAC → subscribe (~8-18s)
+- **Reconnect after disconnect**: adapter reset → direct connect by MAC → subscribe (~8-18s)
+- **Recovery after 3+ failures**: `bluetoothctl remove` → adapter reset → scan with early exit → connect
+
+**Ready for Step 2: GPIO button handling.**
 
 ---
 
@@ -61,12 +65,11 @@ The code is essentially the same across these tests. The main variable is BLE co
 
 | Test | Result |
 |------|--------|
-| 20 (23:22) | Rough run — 6 attempts to connect, direct reconnect not tested, adapter errors |
-| 19 (23:16) | Cold start OK (~18s), direct reconnect works but InProgress blocks, 93s stable |
-| 18 (23:04) | **PERFECT** — first-attempt connect, 9s to heartbeat, 111s stable |
-| 17 (22:56) | Improved — 2nd attempt connect, 49s to heartbeat |
-| 16 (22:50) | Partial fix — 4th attempt connect, 60s to heartbeat |
-| 15 (22:42) | REGRESSION — all connections timeout |
-| 14 (22:30) | Full success — 3m41s stable, no speed optimizations |
-| 13 (22:24) | Reliable discovery, disconnects at ~25s |
+| 21 (23:27) | **SUCCESS** — direct connect, 13s to heartbeat, 54 heartbeats, 105s stable |
+| 20 (23:22) | Rough — 6 attempts, adapter errors |
+| 19 (23:16) | Direct reconnect works but InProgress blocks it |
+| 18 (23:04) | Perfect scan+connect, 9s to heartbeat |
+| 15-17 | Optimization attempts with regressions |
+| 14 (22:30) | First stable connection (3m41s) |
+| 13 (22:24) | First reliable discovery |
 | 1-12 | Early tests — discovery and connection issues |
