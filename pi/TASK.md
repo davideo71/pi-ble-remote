@@ -2,22 +2,24 @@
 
 ## What to do
 1. `git pull` to get the latest code
-2. Run `python3 pi/ble_receiver.py` for about **3-4 minutes** (we need to see if connections last longer than 25-27 seconds now)
-3. Update `pi/REPORT.md` with results, commit and push
+2. Run `python3 pi/ble_receiver.py` for about **2-3 minutes**
+3. **Important**: After it connects and runs for ~30 seconds, **kill the ble_receiver.py process** (Ctrl+C), wait 5 seconds, then **start it again**. This simulates a reconnection scenario.
+4. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 14)
-1. **ESP32: relaxed connection parameters** — on connect, the ESP32 now requests: interval 30-60ms, latency 0, supervision timeout **6 seconds** (was likely default ~2s). This should fix the ~25-second disconnects.
-2. **ESP32: heartbeat notify() return value logged** — to diagnose the "Connection 2 had no heartbeats" issue from Test 13.
-3. **Pi code: unchanged** — adapter reset + active scanning already working well.
-4. **ESP32: flash erased and reflashed** — clean state.
+## What changed this iteration (Test 15)
+Pi-side only — no ESP32 changes. Optimized for fast connection and reconnection:
+1. **Early exit scan** — stops scanning the instant the ESP32 is found (was waiting full 10s)
+2. **Fast reconnect path** — on reconnect, tries a quick 3s address-based scan first, skips adapter reset
+3. **Faster adapter reset** — 1.5s total (was 3s)
+4. **Shorter reconnect delay** — 1s (was 3s)
+5. **InProgress error** — retries immediately instead of waiting
 
 ## Expected
-- Discovery should still be reliable (as in Test 13: 16 hits in one scan)
-- Connections should last **much longer than 25 seconds** now
-- Heartbeat notifications every ~2 seconds
-- If a connection still drops, check the disconnect reason code in the ESP32 serial logs
+- First connection should be faster than Test 14 (early exit scan)
+- After kill + restart, reconnection should be noticeably faster
+- Connection should still be stable once established
 
 ## Key questions to answer
-1. Do connections survive past the 25-27 second mark?
-2. Do heartbeats arrive consistently on every connection (not just 2 of 3)?
-3. Does auto-reconnect still work reliably?
+1. How long from script start to first heartbeat received? (Time the initial connection)
+2. How long from script restart to first heartbeat? (Time the reconnection)
+3. Does the connection stay stable after reconnecting?

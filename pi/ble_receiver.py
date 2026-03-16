@@ -22,11 +22,11 @@ SERVICE_UUID = "4e520001-7354-4288-9a71-81a9bf56c4a8"
 BUTTON_CHAR_UUID = "4e520002-7354-4288-9a71-81a9bf56c4a8"
 KNOWN_MAC = "38:44:BE:45:AD:86"  # ESP32-C3 BLE address (for pre-scan cache clearing)
 
-# Reconnection settings
-SCAN_TIMEOUT = 10.0        # seconds to scan before retrying
-CONNECT_TIMEOUT = 15.0     # seconds to wait for connection
-RECONNECT_DELAY = 3.0      # seconds between reconnection attempts
-MAX_RECONNECT_DELAY = 15.0 # max backoff delay
+# Timing — tuned for fast reconnection
+SCAN_TIMEOUT = 8.0         # max seconds to scan (usually finds device in <1s)
+CONNECT_TIMEOUT = 10.0     # seconds to wait for connection
+RECONNECT_DELAY = 1.0      # seconds between reconnection attempts (fast!)
+MAX_RECONNECT_DELAY = 10.0 # max backoff delay
 
 # State
 connected_address = None   # Remember MAC for faster reconnect
@@ -59,37 +59,37 @@ def disconnected_callback(client: BleakClient):
 
 
 async def scan_for_device():
-    """Scan for our BLE remote device. Returns the device or None."""
+    """Scan for our BLE remote device. Returns the device or None.
+
+    Strategy for speed:
+    1. If we have a cached MAC, try a quick address-based scan first (no reset needed)
+    2. If that fails, do a full scan with adapter reset to clear BlueZ state
+    3. Stop scanning the moment we find our device (don't wait for timeout)
+    """
     global connected_address
 
-    # If we've connected before, try by address first (faster)
+    # Fast path: if we've connected before, try by address without resetting
     if connected_address:
-        log(f"Scanning for known address {connected_address}...")
+        log(f"Quick scan for known address {connected_address}...")
         device = await BleakScanner.find_device_by_address(
-            connected_address, timeout=SCAN_TIMEOUT / 2
+            connected_address, timeout=3.0,
+            scanning_mode="active",
         )
         if device:
-            log(f"Found by address: {device.name} ({device.address})")
+            log(f"Found by address in quick scan: {device.name} ({device.address})")
             return device
-        log("Known address not found, falling back to service UUID scan", "WARN")
+        log("Quick scan failed, falling back to full scan with adapter reset", "WARN")
 
-    # Remove stale BlueZ cache BEFORE scanning so the device is discovered fresh as LE
-    # Always remove — BlueZ may have it cached as BR/EDR from old firmware ("EasyPlay")
+    # Full scan path: reset adapter to clear BlueZ duplicate filter
     addr_to_remove = connected_address or KNOWN_MAC
     await remove_bluez_device(addr_to_remove)
-
-    # Reset the Bluetooth adapter before each scan to clear BlueZ's internal
-    # duplicate filter. Without this, BlueZ may suppress advertisements from
-    # devices it has already seen in this adapter session, even if they were
-    # removed from the cache above. This is the "surgical" version of the full
-    # systemctl restart — we just cycle power on the adapter via bluetoothctl.
     await reset_bluetooth_adapter()
 
-    # Scan by service UUID (more reliable than name — BlueZ caches names)
-    log(f"Scanning for BLE devices (timeout={SCAN_TIMEOUT}s, matching UUID in callback)...")
+    log(f"Scanning for BLE devices (max {SCAN_TIMEOUT}s, early exit on match)...")
 
     devices_found = 0
     target_device = None
+    scan_done = asyncio.Event()  # Signal to stop scanning early
 
     def detection_callback(device, advertisement_data):
         nonlocal devices_found, target_device
@@ -105,28 +105,31 @@ async def scan_for_device():
             log(f"  SCAN: ** MATCH ({match_reason}) ** {device.address} name={device.name!r} "
                 f"RSSI={advertisement_data.rssi}dBm UUIDs={advertisement_data.service_uuids}", "DEBUG")
             target_device = device
+            scan_done.set()  # Stop scanning immediately!
         elif devices_found <= 5:
             log(f"  SCAN: {device.address} name={device.name!r} RSSI={advertisement_data.rssi}dBm", "DEBUG")
 
-    # No service_uuids filter — BlueZ D-Bus filter is unreliable with NimBLE's
-    # advertisement format. Instead we match by UUID in the detection callback above.
-    # Active scanning sends scan requests, which triggers the ESP32's scan response
-    # containing the service UUID — critical for discovery.
+    # Active scanning triggers ESP32's scan response containing the service UUID
     scanner = BleakScanner(
         detection_callback=detection_callback,
         scanning_mode="active",
     )
     await scanner.start()
-    await asyncio.sleep(SCAN_TIMEOUT)
+
+    # Wait for either: device found (early exit) or timeout
+    try:
+        await asyncio.wait_for(scan_done.wait(), timeout=SCAN_TIMEOUT)
+        log(f"Early exit: device found after scanning {devices_found} devices")
+    except asyncio.TimeoutError:
+        log(f"Scan timeout: {devices_found} devices seen, target not found", "WARN")
+
     await scanner.stop()
 
-    log(f"Scan complete: {devices_found} devices seen")
-
     if target_device:
-        log(f"Found target by service UUID: {target_device.name} ({target_device.address})")
+        log(f"Found target: {target_device.name} ({target_device.address})")
         return target_device
 
-    # Fallback: also check by name in case service UUID wasn't in advertisement
+    # Fallback: check by name in case service UUID wasn't in advertisement
     for d in scanner.discovered_devices:
         if d.name == DEVICE_NAME:
             log(f"Found target by name: {d.name} ({d.address})")
@@ -147,7 +150,7 @@ async def remove_bluez_device(address):
         log(f"  Removed from BlueZ cache")
     else:
         log(f"  Not in cache (OK): {result.stderr.strip()}", "DEBUG")
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.3)
 
 
 async def connect_and_listen(device):
@@ -156,9 +159,6 @@ async def connect_and_listen(device):
 
     log(f"Connecting to {device.address} (timeout={CONNECT_TIMEOUT}s)...")
 
-    # Note: we no longer remove the BlueZ cache here — that destroys the D-Bus
-    # device object bleak needs. The service_uuids scanner filter already ensures
-    # BlueZ creates a proper LE device entry.
     async with BleakClient(
         device,
         disconnected_callback=disconnected_callback,
@@ -184,7 +184,6 @@ async def connect_and_listen(device):
         log("--------------------------------------------")
 
         # Stay connected and print a status line periodically
-        notification_count = 0
         while client.is_connected:
             await asyncio.sleep(5.0)
             if client.is_connected:
@@ -194,13 +193,16 @@ async def connect_and_listen(device):
 
 
 async def reset_bluetooth_adapter():
-    """Reset the BlueZ adapter to recover from stuck states."""
+    """Reset the BlueZ adapter to recover from stuck states.
+
+    Tightened timing: 0.5s off + 1s on = ~1.5s total (was 3s).
+    """
     log("Cycling Bluetooth adapter off/on...")
     try:
         subprocess.run(["bluetoothctl", "power", "off"], capture_output=True, timeout=5)
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
         subprocess.run(["bluetoothctl", "power", "on"], capture_output=True, timeout=5)
-        await asyncio.sleep(2)
+        await asyncio.sleep(1.0)
         log("Bluetooth adapter reset complete")
     except Exception as e:
         log(f"Adapter reset failed: {e}", "ERROR")
@@ -240,8 +242,9 @@ async def main():
             error_str = str(e)
             log(f"BLE error: {e}", "ERROR")
             if "InProgress" in error_str or "in progress" in error_str.lower():
-                log("BlueZ stuck — resetting Bluetooth adapter...", "WARN")
+                log("BlueZ stuck — resetting adapter and retrying immediately...", "WARN")
                 await reset_bluetooth_adapter()
+                continue  # Skip the reconnect delay — retry now
         except asyncio.TimeoutError:
             log("Connection timed out", "ERROR")
         except OSError as e:
