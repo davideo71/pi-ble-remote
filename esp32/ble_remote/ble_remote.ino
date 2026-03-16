@@ -119,7 +119,7 @@ void setup() {
     printTimestamp();
     Serial.println("Initializing NimBLE...");
     NimBLEDevice::init("BLE-Remote");
-    NimBLEDevice::setPower(20);  // Max TX power: +20 dBm (NimBLE 2.x takes dBm directly)
+    NimBLEDevice::setPower(9);  // Reduced TX power: +9 dBm — cheap C3 clones distort at max power
     printTimestamp();
     Serial.printf("TX power set to: %d dBm\n", NimBLEDevice::getPower());
     printTimestamp();
