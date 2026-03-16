@@ -174,10 +174,10 @@ async def connect_and_listen_by_address(address):
     """Connect directly by MAC address (skip scanning). Used for reconnection."""
     global connected_address
 
-    # Light cleanup: disconnect + brief wait instead of full adapter power cycle.
-    # BlueZ throws "InProgress" if it still thinks a connection is active.
-    # A targeted disconnect + hci reset should clear that without the 4s overhead.
-    await light_reset(address)
+    # Full adapter reset before reconnect. Light reset (disconnect + hci reset)
+    # was unreliable — failed to clear InProgress in Tests 23-24.
+    # The 4s overhead is worth the reliability.
+    await reset_bluetooth_adapter()
 
     log(f"Connecting to {address} by address (timeout={CONNECT_TIMEOUT}s)...")
 

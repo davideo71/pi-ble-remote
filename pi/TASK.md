@@ -5,15 +5,14 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 24)
-No code changes. **Buttons are now soldered and working on the ESP32.** Test 23 confirmed the connection and heartbeat handler work. This test should capture actual button press/release events.
+## What changed this iteration (Test 25)
+**Reverted to full adapter reset.** The light reset (disconnect + hci reset) was unreliable — Test 24 had 8 failed attempts, all hitting InProgress. Back to the proven full power cycle (1s off + 3s on = 4s).
 
-Buttons will be pressed manually during the test.
+Buttons are soldered and will be pressed during the test.
 
 ## Expected
-- Connection as before
-- **Button events**: `BUTTON: 'L' → LEFT press` etc. mixed in with heartbeats
-- All 5 buttons should appear (L, R, U, D, O)
+- Connection on first attempt (~13s cold start like Test 21)
+- Button events arriving as `BUTTON: 'L' → LEFT press` etc.
 
 ## Key question
-Do button events arrive and get decoded correctly on the Pi?
+Does the full adapter reset restore reliable connections? Do button events arrive?
