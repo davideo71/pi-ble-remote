@@ -5,19 +5,20 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 28)
-Two fixes based on analysis of Tests 24-27 failures:
+## What changed this iteration (Test 29)
+The code now has TWO key fixes that may not have been in effect for Test 28 (git timing):
 
-1. **Scan first on cold start, direct connect only for reconnect.** The pre-seeded MAC broke when BlueZ cache was emptied by `bluetoothctl remove` during recovery. Now `connected_address` starts as `None`, so the first connection uses scan-based discovery (like Test 18). Direct connect only after a successful connection in the same session.
+1. **`connected_address = None` on startup** — forces scan-based discovery on first connection (not direct-connect by MAC). This was the root cause of "Device not found" errors.
+2. **`systemctl restart bluetooth` runs automatically at script startup** — built into the Python script now.
 
-2. **`systemctl restart bluetooth` on startup.** Clears accumulated BlueZ state that caused 4 consecutive test failures. This runs automatically at script start.
+Also: ESP32 was removed from the protoboard (buttons disconnected) in case the wiring was causing hardware interference.
 
 ## Expected
-- Bluetooth service restart clears bad state
-- Scan finds the device on first try (like Tests 18-21)
-- Connection succeeds
-- Simulated button events arrive (L, R, U, D, O cycling every 500ms)
-- Direct connect used for any reconnection within the session
+- Script restarts bluetooth service automatically
+- Scan finds the ESP32 (like Tests 13-18)
+- Connection succeeds on first or second attempt
+- Simulated button events arrive (L, R, U, D, O cycling)
+- Heartbeats every 2s
 
 ## Key question
-Does scan-first + service restart restore reliable connections? Do buttons arrive?
+Does scan-based first connection work? Do simulated button events arrive?
