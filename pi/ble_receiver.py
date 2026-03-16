@@ -80,12 +80,11 @@ async def scan_for_device():
             return device
         log("Quick scan failed, falling back to full scan with adapter reset", "WARN")
 
-    # Full scan path: reset adapter to clear BlueZ duplicate filter
-    # Only remove from BlueZ cache on first scan (no cached address yet).
-    # Removing every time forces BlueZ to re-establish from scratch and
-    # causes multiple failed connection attempts (Test 16 regression).
-    if not connected_address:
-        await remove_bluez_device(KNOWN_MAC)
+    # Full scan path: reset adapter to clear BlueZ duplicate filter.
+    # Do NOT remove from BlueZ cache here — removal forces BlueZ to
+    # re-discover from scratch and the first connection after fresh
+    # discovery consistently fails (Tests 16-17). Only use removal
+    # as a recovery step after multiple failed connections (see main loop).
     await reset_bluetooth_adapter()
 
     log(f"Scanning for BLE devices (max {SCAN_TIMEOUT}s, early exit on match)...")
@@ -226,12 +225,21 @@ async def main():
     print("--------------------------------------------\n")
 
     reconnect_delay = RECONNECT_DELAY
+    consecutive_failures = 0
 
     while True:
         try:
+            # After 3+ consecutive failures, try clearing BlueZ cache as recovery
+            if consecutive_failures >= 3:
+                addr_to_remove = connected_address or KNOWN_MAC
+                log(f"Recovery: removing {addr_to_remove} from BlueZ cache after {consecutive_failures} failures", "WARN")
+                await remove_bluez_device(addr_to_remove)
+                consecutive_failures = 0
+
             # Scan
             device = await scan_for_device()
             if device is None:
+                consecutive_failures += 1
                 log(f"Retrying in {reconnect_delay:.0f}s...", "WARN")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 1.5, MAX_RECONNECT_DELAY)
@@ -243,7 +251,11 @@ async def main():
             # Connect and listen
             await connect_and_listen(device)
 
+            # If we get here, connection was established and then closed cleanly
+            consecutive_failures = 0
+
         except BleakError as e:
+            consecutive_failures += 1
             error_str = str(e)
             log(f"BLE error: {e}", "ERROR")
             if "InProgress" in error_str or "in progress" in error_str.lower():
@@ -251,8 +263,10 @@ async def main():
                 await reset_bluetooth_adapter()
                 continue  # Skip the reconnect delay — retry now
         except asyncio.TimeoutError:
+            consecutive_failures += 1
             log("Connection timed out", "ERROR")
         except OSError as e:
+            consecutive_failures += 1
             log(f"OS error: {e}", "ERROR")
         except asyncio.CancelledError:
             log("Shutting down...", "INFO")

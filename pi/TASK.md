@@ -5,15 +5,16 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 17)
-Two fixes for the "multiple failed attempts" issue from Test 16:
-1. **Connect timeout back to 15s** (was 10s) — BlueZ sometimes needs >10s to complete the connection handshake
-2. **Only `bluetoothctl remove` on first scan** — not on retries. Removing every time was forcing BlueZ to re-discover from scratch, causing repeated failures.
+## What changed this iteration (Test 18)
+**Removed `bluetoothctl remove` from normal scan flow.** Tests 16-17 showed that removing the device from BlueZ cache before scanning causes the first connection to fail consistently. Now:
+- Normal flow: just adapter reset + scan (no cache removal)
+- Recovery: `bluetoothctl remove` only triggers after 3+ consecutive failures
+- This matches the pattern from Test 14 (which never removed the cache and connected first try)
 
 ## Expected
 - First connection attempt should succeed (like Test 14)
-- Fast discovery via early exit scan still works
+- Discovery still fast via early exit scan
 - Stable connection once established
 
 ## Key question
-Does the first connection attempt succeed? (Test 16 needed 4 attempts)
+Does the FIRST connection attempt succeed now?
