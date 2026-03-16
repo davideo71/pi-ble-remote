@@ -1,8 +1,8 @@
 # Pi Test Report: Step 2 — Button Handling
 
-## Test 28 — 2026-03-17 00:32 UTC (full bluetooth service restart before test)
+## Test 28b — 2026-03-17 00:36 UTC (scan first + service restart + simulated buttons)
 
-**Duration:** ~120 seconds (after `sudo systemctl restart bluetooth && sleep 3`)
+**Duration:** ~120 seconds
 
 ### Environment
 
@@ -11,41 +11,41 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: FAILED — "Device not found" on all attempts, even after service restart
+### Result: PROGRESS — ESP32 found by scan, but ALL connections fail
 
-#### Pre-test
-- Ran `sudo systemctl restart bluetooth && sleep 3` successfully
-- This should have cleared all BlueZ state completely
+#### Good news: ESP32 IS advertising
+- Scan-based discovery works — device found **4 times** across scans
+- First match by **UUID** (scan 3), then by **MAC** (scans 4-6)
+- RSSI: -85 to -89 dBm (normal range)
+- The scan-first approach and service restart brought the ESP32 back into view
 
-#### Attempt log
-1. Full reset → timeout (16s)
-2. Full reset → **"Device not found"** (15s)
-3. Full reset → **"Device not found"** (15s)
-4. Recovery (cache remove) → full reset → **"Device not found"** (15s)
-5. Full reset → **"Device not found"** (15s)
-6. Full reset → (test timed out)
+#### Bad news: Every connection drops during setup
+- **Attempt 1**: Found by UUID → connect → `br-connection-canceled` after 5.3s
+- **Attempt 2**: Found by MAC → connect → DISCONNECTED after 5.2s → timeout
+- **Attempt 3**: Found by MAC → connect → "failed to discover services, device disconnected" after 7.3s
+- **Attempt 4**: Found by MAC → connect → DISCONNECTED after 19.5s → timeout
 
-### Conclusion: This is NOT a Pi/BlueZ issue
+Every connection attempt reaches the ESP32 (DISCONNECTED callback fires = a connection was partially established) but drops during GATT service discovery. This is the **exact same pattern as Test 25**.
 
-A full `systemctl restart bluetooth` clears ALL BlueZ state — cached devices, connections, internal state, everything. If the ESP32 were advertising, a fresh BlueZ would find it via the `BleakClient(address)` call (which does a background scan).
+#### Error: `br-connection-canceled`
+This error appeared on the first connection attempt. It means BlueZ tried a **BR/EDR (classic Bluetooth) connection** instead of BLE. This happens when BlueZ doesn't know the device is LE-only. After `bluetoothctl remove`, BlueZ loses the LE flag and may default to BR/EDR on the next connection.
 
-**The ESP32 is not advertising.** The simulated button firmware is either:
-1. Crashing before or during BLE initialization
-2. Not starting advertising due to the button simulation code
-3. Advertising on a different MAC address after reflash
+### Analysis
 
-### Diagnostic: Manual scan from Pi
+The connection failures are **consistent with the button firmware on the ESP32**:
+- Tests 21-23 (pre-button firmware): connections work perfectly
+- Tests 24-28 (button firmware): every connection drops during service discovery
 
-I'll do a quick manual scan to verify:
+The ESP32 is advertising (we can see it) but **drops the connection during GATT operations**. This strongly suggests:
 
-```
-bluetoothctl scan on   (look for any device with "BLE-Remote" or "EasyPlay" or MAC 38:44:BE:45:AD:86)
-```
+1. **The simulated button code is interfering with BLE GATT operations** — sending notifications during service discovery may confuse the NimBLE stack
+2. **The 500ms button simulation interval may be too aggressive** — the ESP32 may be trying to send notifications before the client has finished subscribing
+3. **The ESP32 may need to wait for a client to subscribe** before sending button notifications
 
 ### Suggestion
-1. **Check ESP32 serial monitor** — is the ESP32 printing startup messages and heartbeat counts?
-2. **Try reverting to the pre-button firmware** (Test 22 version) to confirm the ESP32 hardware is OK
-3. **The direct-connect path is not the problem** — the device simply isn't there
+1. **On ESP32: only send button notifications AFTER a client subscribes** (check `pCharacteristic->getSubscribedCount() > 0` before notify)
+2. **On ESP32: delay button simulation start by 5-10 seconds** after a connection to let GATT discovery complete
+3. **Or: disable simulated buttons entirely** and test with real button hardware (which only sends on physical press)
 
 ---
 
@@ -53,12 +53,12 @@ bluetoothctl scan on   (look for any device with "BLE-Remote" or "EasyPlay" or M
 
 | Test | Result |
 |------|--------|
-| 28 (00:32) | **FAILED** — full service restart didn't help, ESP32 not advertising |
-| 27 (00:29) | FAILED — "Device not found" |
-| 26 (00:20) | FAILED — "Device not found" |
-| 25 (00:12) | FAILED — ESP32 drops connections |
-| 24 (00:07) | FAILED — InProgress errors |
-| 23 (00:02) | Last successful connection (heartbeats, no buttons) |
+| 28b (00:36) | ESP32 found by scan, but all connections drop during GATT discovery |
+| 28 (00:32) | FAILED — "Device not found" (pre-scan-first code) |
+| 27-26 | FAILED — "Device not found" |
+| 25 | FAILED — ESP32 drops connections (same pattern as 28b) |
+| 24 | FAILED — InProgress errors |
+| 23 | Last successful connection (heartbeats, no buttons) |
 | 22-21 | Success — direct connect by MAC |
-| 18 | Best scan+connect, 9s to heartbeat |
+| 18 | Best scan+connect, 9s |
 | 14 | First stable connection (3m41s) |
