@@ -2,23 +2,22 @@
 
 ## What to do
 1. `git pull` to get the latest code
-2. **Before running the test**, restart the bluetooth service to clear all state:
-   ```bash
-   sudo systemctl restart bluetooth
-   sleep 3
-   ```
-3. Run `python3 pi/ble_receiver.py` for about **2 minutes**
-4. Update `pi/REPORT.md` with results, commit and push
+2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
+3. Update `pi/REPORT.md` with results, commit and push
 
 ## What changed this iteration (Test 28)
-No code changes. **Full bluetooth service restart before test.** Tests 24-26 all failed after Tests 21-23 worked perfectly. Suspicion is that accumulated BlueZ state from repeated failures is the problem. A full service restart should clear everything.
+Two fixes based on analysis of Tests 24-27 failures:
 
-ESP32 is confirmed advertising with simulated button presses (cycling L, R, U, D, O every 500ms).
+1. **Scan first on cold start, direct connect only for reconnect.** The pre-seeded MAC broke when BlueZ cache was emptied by `bluetoothctl remove` during recovery. Now `connected_address` starts as `None`, so the first connection uses scan-based discovery (like Test 18). Direct connect only after a successful connection in the same session.
+
+2. **`systemctl restart bluetooth` on startup.** Clears accumulated BlueZ state that caused 4 consecutive test failures. This runs automatically at script start.
 
 ## Expected
-- Clean BlueZ state after service restart
-- Connection on first attempt (like Tests 21-23)
-- Simulated button events arriving correctly
+- Bluetooth service restart clears bad state
+- Scan finds the device on first try (like Tests 18-21)
+- Connection succeeds
+- Simulated button events arrive (L, R, U, D, O cycling every 500ms)
+- Direct connect used for any reconnection within the session
 
 ## Key question
-Does restarting the bluetooth service fix the connection reliability?
+Does scan-first + service restart restore reliable connections? Do buttons arrive?

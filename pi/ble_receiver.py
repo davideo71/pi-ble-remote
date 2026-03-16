@@ -28,8 +28,9 @@ CONNECT_TIMEOUT = 15.0     # seconds to wait for connection (10s caused early ti
 RECONNECT_DELAY = 1.0      # seconds between reconnection attempts (fast!)
 MAX_RECONNECT_DELAY = 10.0 # max backoff delay
 
-# State — pre-seed with known MAC so direct-connect works from first run
-connected_address = KNOWN_MAC
+# State — start with None so first connection uses scan (populates BlueZ cache).
+# Direct-connect by MAC only works after a successful connection in this session.
+connected_address = None
 
 
 def ts():
@@ -293,11 +294,21 @@ async def main():
     print()
     print("============================================")
     print("  BLE Remote Receiver - Raspberry Pi")
-    print("  Step 1: Connection + Heartbeat Debug")
+    print("  Step 2: Buttons + Connection")
     print("============================================")
     log(f"Target device: {DEVICE_NAME}")
     log(f"Service UUID:  {SERVICE_UUID}")
     log(f"Char UUID:     {BUTTON_CHAR_UUID}")
+
+    # Clean BlueZ state on startup — prevents accumulated failures
+    log("Restarting bluetooth service for clean state...")
+    try:
+        subprocess.run(["sudo", "systemctl", "restart", "bluetooth"],
+                       capture_output=True, timeout=10)
+        await asyncio.sleep(3)
+        log("Bluetooth service restarted")
+    except Exception as e:
+        log(f"Service restart failed (continuing): {e}", "WARN")
     print("--------------------------------------------\n")
 
     reconnect_delay = RECONNECT_DELAY
