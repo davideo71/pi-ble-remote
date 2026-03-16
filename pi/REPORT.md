@@ -1,6 +1,6 @@
 # Pi Test Report: Step 2 — Button Handling
 
-## Test 28b — 2026-03-17 00:36 UTC (scan first + service restart + simulated buttons)
+## Test 29 — 2026-03-17 00:42 UTC (ESP32: 5s grace period before notifications)
 
 **Duration:** ~120 seconds
 
@@ -11,41 +11,49 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: PROGRESS — ESP32 found by scan, but ALL connections fail
+### Result: FAILED — 5s grace period did NOT fix connection drops
 
-#### Good news: ESP32 IS advertising
-- Scan-based discovery works — device found **4 times** across scans
-- First match by **UUID** (scan 3), then by **MAC** (scans 4-6)
-- RSSI: -85 to -89 dBm (normal range)
-- The scan-first approach and service restart brought the ESP32 back into view
+#### Discovery: Working well
+- ESP32 found by **UUID** on 4 out of 6 scans (consistently advertising)
+- RSSI: -85 to -89 dBm
+- Early exit scan working: device found in 2-13 devices, 2-5 seconds
 
-#### Bad news: Every connection drops during setup
-- **Attempt 1**: Found by UUID → connect → `br-connection-canceled` after 5.3s
-- **Attempt 2**: Found by MAC → connect → DISCONNECTED after 5.2s → timeout
-- **Attempt 3**: Found by MAC → connect → "failed to discover services, device disconnected" after 7.3s
-- **Attempt 4**: Found by MAC → connect → DISCONNECTED after 19.5s → timeout
+#### Connection: Still failing every time
+- **Attempt 1**: Found → connect → DISCONNECTED → timeout (17s)
+- **Attempt 2**: Found → connect → DISCONNECTED → timeout (19s)
+- **Attempt 3**: "No powered adapters" (adapter timing)
+- **Attempt 4**: Not found in scan
+- **Attempt 5**: Found → connect → DISCONNECTED → timeout (19s)
+- **Attempt 6**: "No powered adapters"
+- **Attempt 7**: Found → connect → (test timed out)
 
-Every connection attempt reaches the ESP32 (DISCONNECTED callback fires = a connection was partially established) but drops during GATT service discovery. This is the **exact same pattern as Test 25**.
+**Zero successful connections.** The DISCONNECTED callback fires during every connection attempt, same as Tests 25 and 28b.
 
-#### Error: `br-connection-canceled`
-This error appeared on the first connection attempt. It means BlueZ tried a **BR/EDR (classic Bluetooth) connection** instead of BLE. This happens when BlueZ doesn't know the device is LE-only. After `bluetoothctl remove`, BlueZ loses the LE flag and may default to BR/EDR on the next connection.
+### Analysis: The 5s grace period is NOT the fix
 
-### Analysis
+The grace period prevents notifications during GATT discovery, but the connection is dropping **before** GATT discovery even completes. The DISCONNECTED event fires 5-19 seconds into the connection attempt — before any service discovery or subscription happens.
 
-The connection failures are **consistent with the button firmware on the ESP32**:
-- Tests 21-23 (pre-button firmware): connections work perfectly
-- Tests 24-28 (button firmware): every connection drops during service discovery
+This means the problem is at the **BLE connection level**, not the GATT/notification level:
 
-The ESP32 is advertising (we can see it) but **drops the connection during GATT operations**. This strongly suggests:
+1. **The ESP32 button firmware may have a connection parameter issue** — the button GPIO setup or ISR handlers may be interfering with BLE connection parameter negotiation
+2. **ESP32 may be crashing/resetting during connection** — the button simulation loop + connection event handling may exceed stack/heap
+3. **The ESP32 connection supervision timeout may have been affected** by the button firmware changes
 
-1. **The simulated button code is interfering with BLE GATT operations** — sending notifications during service discovery may confuse the NimBLE stack
-2. **The 500ms button simulation interval may be too aggressive** — the ESP32 may be trying to send notifications before the client has finished subscribing
-3. **The ESP32 may need to wait for a client to subscribe** before sending button notifications
+### Strong evidence: This is the button firmware
+
+| Tests 21-23 (pre-button firmware) | Tests 24-29 (button firmware) |
+|-----------------------------------|-----------------------------|
+| First-attempt connections | Zero successful connections |
+| 100+ second stable sessions | Every connection drops in <20s |
+| Heartbeats flowing | Never reaches subscription |
 
 ### Suggestion
-1. **On ESP32: only send button notifications AFTER a client subscribes** (check `pCharacteristic->getSubscribedCount() > 0` before notify)
-2. **On ESP32: delay button simulation start by 5-10 seconds** after a connection to let GATT discovery complete
-3. **Or: disable simulated buttons entirely** and test with real button hardware (which only sends on physical press)
+**Revert to the exact ESP32 firmware from Test 22** (heartbeat only, no buttons) to confirm the hardware is still OK. Then add button support incrementally:
+1. First: just GPIO init (no button reading)
+2. Then: button reading without BLE notifications
+3. Then: button BLE notifications
+
+This will isolate which part of the button code breaks BLE.
 
 ---
 
@@ -53,12 +61,12 @@ The ESP32 is advertising (we can see it) but **drops the connection during GATT 
 
 | Test | Result |
 |------|--------|
-| 28b (00:36) | ESP32 found by scan, but all connections drop during GATT discovery |
-| 28 (00:32) | FAILED — "Device not found" (pre-scan-first code) |
+| 29 (00:42) | **FAILED** — 5s grace period didn't help, connections drop at BLE level |
+| 28b (00:36) | FAILED — ESP32 found, connections drop during GATT |
+| 28 (00:32) | FAILED — "Device not found" |
 | 27-26 | FAILED — "Device not found" |
-| 25 | FAILED — ESP32 drops connections (same pattern as 28b) |
+| 25 | FAILED — ESP32 drops connections |
 | 24 | FAILED — InProgress errors |
-| 23 | Last successful connection (heartbeats, no buttons) |
-| 22-21 | Success — direct connect by MAC |
-| 18 | Best scan+connect, 9s |
-| 14 | First stable connection (3m41s) |
+| 23 | Last successful connection |
+| 22-21 | Success — direct connect |
+| 18 | Best result (9s) |
