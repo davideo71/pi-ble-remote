@@ -1,6 +1,6 @@
 # Pi Test Report: Step 2 — Button Handling
 
-## Test 25 — 2026-03-17 00:12 UTC (reverted to full adapter reset + button test)
+## Test 26 — 2026-03-17 00:20 UTC (simulated button presses on ESP32)
 
 **Duration:** ~120 seconds
 
@@ -11,37 +11,39 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: FAILED — 6 attempts, all timed out. ESP32 dropping connections.
+### Result: FAILED — ESP32 not visible at all ("Device not found")
 
 #### Attempt log
-1. Full reset (4.2s) → connect → **DISCONNECTED after 5.4s** → timeout at 15s
-2. Full reset (4.2s) → connect → timeout at 17s (no disconnect callback)
-3. Full reset (4.1s) → connect → **DISCONNECTED after 13.8s** → timeout
-4. Recovery (cache remove) → full reset → connect → **DISCONNECTED after 4.4s** → timeout
-5. Full reset (4.2s) → connect → **DISCONNECTED after 6.8s** → timeout
-6. Full reset (4.2s) → connect → (test timed out)
+1. Full reset → connect → **"Device with address 38:44:BE:45:AD:86 was not found"** (15s)
+2. Full reset → connect → timeout (19s)
+3. Full reset → connect → **"Device not found"** (15s)
+4. Recovery (cache remove) → full reset → **"Device not found"** (15s)
+5. Full reset → **"Device not found"** (15s)
+6. Full reset → connect → (test timed out)
 
-**Zero successful connections in 120 seconds.**
+**New error: "Device was not found"** — this is different from Tests 24-25:
+- Test 24: InProgress errors (BlueZ state issue)
+- Test 25: DISCONNECTED during service discovery (ESP32 dropping connection)
+- **Test 26: ESP32 not discoverable at all**
 
-#### Key observation: the problem is NOT BlueZ
-- Full adapter reset eliminated all InProgress errors (good — this confirms Test 24's light reset was the issue there)
-- But connections are now **consistently dropping during service discovery** — the DISCONNECTED callback fires 4-14 seconds into the connection attempt
-- This is a **different failure mode** from Tests 15-17 (which were BlueZ state issues) and Test 24 (which was InProgress)
+### Analysis
 
-#### This is an ESP32-side issue
-The DISCONNECTED events during connection setup strongly suggest the **ESP32 is terminating the connection**. Possible causes:
-1. **Button GPIO configuration is interfering with BLE** — the new button firmware initializes GPIO 0-4 with pull-ups, and GPIO 0 is often a boot/strapping pin on ESP32-C3 that can affect boot mode
-2. **The ESP32 NimBLE stack may be crashing** when the Pi connects and triggers GATT service discovery
-3. **The button debounce ISR or task may be consuming too much CPU**, starving the BLE stack
+The ESP32 appears to be **completely invisible** to the Pi's Bluetooth adapter. Possible causes:
+
+1. **The simulated button firmware may crash before starting BLE** — if the button simulation code runs before `NimBLEDevice::init()` completes, it could crash the ESP32
+2. **ESP32 stopped advertising** — the periodic re-advertising pattern from earlier tests. The ESP32 may need a power cycle.
+3. **The new firmware may have a compilation/upload error** — worth checking the serial output
+
+### Note on direct-connect without scan
+The direct-connect path (`BleakClient(address)`) relies on BlueZ having the device in its cache or being able to discover it in the background. When the device isn't advertising at all, this path gives "Device not found" instead of a timeout. This is actually a better error than a 15s timeout — it fails faster.
 
 ### Suggestion
-1. **Check ESP32 serial output** — is there a crash/reboot when the Pi tries to connect?
-2. **Check if GPIO 0 is safe to use** on the ESP32-C3 Super Mini — it may be a strapping pin
-3. **Try disabling button handling temporarily** to confirm it's the button firmware causing the issue
-4. **Compare ESP32 heap/stack** before and after the button firmware change
+1. **Check ESP32 serial output** — is it booting and advertising?
+2. **Power cycle the ESP32** — may need a fresh start after the firmware change
+3. **If the ESP32 is advertising but still not found**: try falling back to scan-based discovery instead of direct MAC connect, as scanning may pick up the device even when direct connect can't
 
 ### Button events
-Not tested — couldn't establish a connection.
+Not tested — ESP32 not visible.
 
 ---
 
@@ -49,8 +51,9 @@ Not tested — couldn't establish a connection.
 
 | Test | Result |
 |------|--------|
-| 25 (00:12) | **FAILED** — 6 attempts, ESP32 drops connection during service discovery |
-| 24 (00:07) | FAILED — 8 attempts, InProgress errors (light reset unreliable) |
+| 26 (00:20) | **FAILED** — ESP32 not visible ("Device not found") |
+| 25 (00:12) | FAILED — ESP32 drops connections during discovery |
+| 24 (00:07) | FAILED — InProgress errors (light reset unreliable) |
 | 23 (00:02) | Connection stable, heartbeats OK, no buttons pressed |
 | 22 (23:37) | Light reset, 12.6s to heartbeat, 107s stable |
 | 21 (23:27) | Direct connect by MAC, 13s to heartbeat, 105s stable |
