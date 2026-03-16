@@ -1,9 +1,10 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server
  *
- * Step 1: Basic BLE connection with verbose debug output.
- * Advertises as "BLE-Remote", sends heartbeat notifications every 2s.
- * Later this will carry button press events instead.
+ * Step 2: Button handling + BLE notifications.
+ * 5 buttons on GPIO 0-4, wired to GND with internal pull-ups.
+ * Sends single ASCII chars: uppercase=press, lowercase=release.
+ * Still sends heartbeat every 2s when no buttons active.
  */
 
 #include <NimBLEDevice.h>
@@ -11,6 +12,28 @@
 // Custom UUIDs for our remote service
 #define SERVICE_UUID        "4e520001-7354-4288-9a71-81a9bf56c4a8"
 #define BUTTON_CHAR_UUID    "4e520002-7354-4288-9a71-81a9bf56c4a8"
+
+// Button configuration: GPIO pin → ASCII char
+// Wired to GND with internal pull-ups (LOW = pressed)
+struct Button {
+    uint8_t pin;
+    char pressChar;    // Uppercase = KEYDOWN
+    char releaseChar;  // Lowercase = KEYUP
+    bool pressed;      // Current debounced state
+    bool lastReading;  // Last raw reading (for debounce)
+    unsigned long lastDebounceTime;
+};
+
+#define NUM_BUTTONS 5
+#define DEBOUNCE_MS 50
+
+Button buttons[NUM_BUTTONS] = {
+    {0, 'L', 'l', false, true, 0},  // GPIO 0 = Left
+    {1, 'R', 'r', false, true, 0},  // GPIO 1 = Right
+    {2, 'U', 'u', false, true, 0},  // GPIO 2 = Up
+    {3, 'D', 'd', false, true, 0},  // GPIO 3 = Down
+    {4, 'O', 'o', false, true, 0},  // GPIO 4 = On/Off
+};
 
 NimBLEServer* pServer = nullptr;
 NimBLECharacteristic* pButtonChar = nullptr;
@@ -31,6 +54,15 @@ void printTimestamp() {
     Serial.printf("[%02lu:%02lu.%03lu] ", mins, secs % 60, ms % 1000);
 }
 
+// Send a single char as BLE notification
+void sendButton(char c) {
+    uint8_t data = (uint8_t)c;
+    pButtonChar->setValue(&data, 1);
+    bool sent = pButtonChar->notify();
+    printTimestamp();
+    Serial.printf("BUTTON: '%c' (0x%02X) notify=%s\n", c, c, sent ? "true" : "false");
+}
+
 // Server callbacks - log every connection event
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
@@ -46,18 +78,9 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             connInfo.getConnInterval(),
             connInfo.getConnInterval() * 1.25);
         printTimestamp();
-        Serial.printf("  Latency: %d\n", connInfo.getConnLatency());
-        printTimestamp();
-        Serial.printf("  Supervision timeout: %d (x10ms = %dms)\n",
-            connInfo.getConnTimeout(),
-            connInfo.getConnTimeout() * 10);
-        printTimestamp();
         Serial.printf("  Free heap: %d bytes\n", ESP.getFreeHeap());
 
         // Request relaxed connection parameters from the central (Pi)
-        // Interval: 24-48 (30-60ms), Latency: 0, Supervision timeout: 600 (6 seconds)
-        // The 25-second disconnect was likely due to a tight default supervision timeout
-        // combined with BlueZ connection parameter negotiation
         pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 600);
         printTimestamp();
         Serial.println("  Requested conn params: interval=30-60ms, latency=0, timeout=6000ms");
@@ -69,12 +92,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         Serial.println("========== CLIENT DISCONNECTED ==========");
         printTimestamp();
         Serial.printf("  Reason: 0x%02X (%d)\n", reason, reason);
-        printTimestamp();
-        Serial.printf("  Free heap: %d bytes\n", ESP.getFreeHeap());
 
         // Critical: restart advertising so the Pi can reconnect
-        printTimestamp();
-        Serial.println("  Restarting advertising...");
         NimBLEDevice::startAdvertising();
         printTimestamp();
         Serial.println("  Advertising restarted - ready for reconnection");
@@ -86,13 +105,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 };
 
-// Characteristic callbacks - log reads/writes
+// Characteristic callbacks
 class ButtonCharCallbacks : public NimBLECharacteristicCallbacks {
-    void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-        printTimestamp();
-        Serial.printf("Characteristic READ by %s\n", connInfo.getAddress().toString().c_str());
-    }
-
     void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
         printTimestamp();
         const char* subType = "UNKNOWN";
@@ -107,72 +121,64 @@ class ButtonCharCallbacks : public NimBLECharacteristicCallbacks {
 
 void setup() {
     Serial.begin(115200);
-    delay(1000);  // Give serial monitor time to connect
+    delay(1000);
 
     bootTime = millis();
 
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 GATT Server");
-    Serial.println("  Step 1: Connection + Heartbeat Debug");
+    Serial.println("  Step 2: Buttons + BLE Notifications");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Boot reason: %d\n", esp_reset_reason());
     printTimestamp();
     Serial.printf("Free heap at boot: %d bytes\n", ESP.getFreeHeap());
+
+    // Initialize button pins
     printTimestamp();
-    Serial.printf("Chip model: %s rev %d\n", ESP.getChipModel(), ESP.getChipRevision());
+    Serial.println("Initializing buttons (GPIO 0-4, INPUT_PULLUP)...");
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        pinMode(buttons[i].pin, INPUT_PULLUP);
+        printTimestamp();
+        Serial.printf("  GPIO %d = '%c'/'%c' (read: %d)\n",
+            buttons[i].pin, buttons[i].pressChar, buttons[i].releaseChar,
+            digitalRead(buttons[i].pin));
+    }
 
     // Initialize NimBLE
     printTimestamp();
     Serial.println("Initializing NimBLE...");
     NimBLEDevice::init("BLE-Remote");
-    NimBLEDevice::setPower(9);  // Reduced TX power: +9 dBm — cheap C3 clones distort at max power
+    NimBLEDevice::setPower(9);  // +9 dBm — cheap C3 clones distort at max power
     printTimestamp();
-    Serial.printf("TX power set to: %d dBm\n", NimBLEDevice::getPower());
-    printTimestamp();
-    Serial.printf("BLE address: %s\n", NimBLEDevice::getAddress().toString().c_str());
+    Serial.printf("TX power: %d dBm | BLE address: %s\n",
+        NimBLEDevice::getPower(),
+        NimBLEDevice::getAddress().toString().c_str());
 
     // Create server
     pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
-    printTimestamp();
-    Serial.println("GATT server created");
 
-    // Create service
+    // Create service + characteristic
     NimBLEService* pService = pServer->createService(SERVICE_UUID);
-    printTimestamp();
-    Serial.printf("Service created: %s\n", SERVICE_UUID);
-
-    // Create button characteristic (notify only for now)
     pButtonChar = pService->createCharacteristic(
         BUTTON_CHAR_UUID,
         NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
     );
     pButtonChar->setCallbacks(new ButtonCharCallbacks());
-    printTimestamp();
-    Serial.printf("Button characteristic created: %s\n", BUTTON_CHAR_UUID);
-
-    // Start service
     pService->start();
-    printTimestamp();
-    Serial.println("Service started");
 
     // Configure and start advertising
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
-    pAdvertising->enableScanResponse(true);  // Include service UUID in scan response
-    // Fast advertising interval for reliable discovery (esp. with weak C3 antenna)
-    // Units are 0.625ms: 0x20 = 20ms, 0x60 = 60ms
+    pAdvertising->enableScanResponse(true);
     pAdvertising->setMinInterval(0x20);  // 20ms
-    pAdvertising->setMaxInterval(0x60);  // 60ms  (was 0xA0=100ms, trying tighter)
+    pAdvertising->setMaxInterval(0x60);  // 60ms
     pAdvertising->start();
 
     printTimestamp();
-    Serial.println("Advertising started (20-60ms interval, scan response enabled)");
-
-    printTimestamp();
-    Serial.println("Advertising started - waiting for connections...");
+    Serial.println("Advertising started — waiting for connections...");
     printTimestamp();
     Serial.printf("Free heap after init: %d bytes\n", ESP.getFreeHeap());
     Serial.println("--------------------------------------------\n");
@@ -181,19 +187,45 @@ void setup() {
 void loop() {
     unsigned long now = millis();
 
-    // Send heartbeat notification every 2 seconds when connected
+    // ---- Button scanning with debounce ----
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        bool reading = !digitalRead(buttons[i].pin);  // LOW = pressed (inverted)
+
+        // Reset debounce timer on state change
+        if (reading != buttons[i].lastReading) {
+            buttons[i].lastDebounceTime = now;
+            buttons[i].lastReading = reading;
+        }
+
+        // Accept new state after debounce period
+        if ((now - buttons[i].lastDebounceTime) >= DEBOUNCE_MS) {
+            if (reading != buttons[i].pressed) {
+                buttons[i].pressed = reading;
+
+                if (deviceConnected) {
+                    sendButton(reading ? buttons[i].pressChar : buttons[i].releaseChar);
+                } else {
+                    printTimestamp();
+                    Serial.printf("BUTTON: '%c' (not connected, dropped)\n",
+                        reading ? buttons[i].pressChar : buttons[i].releaseChar);
+                }
+            }
+        }
+    }
+
+    // ---- Heartbeat every 2s (keeps connection alive, useful for monitoring) ----
     if (deviceConnected && (now - lastHeartbeat >= 2000)) {
         lastHeartbeat = now;
         heartbeatCounter++;
 
-        // Pack counter as 4 bytes (little-endian)
         pButtonChar->setValue(heartbeatCounter);
         bool sent = pButtonChar->notify();
 
-        printTimestamp();
-        Serial.printf("HEARTBEAT #%d notify_returned=%s\n",
-            heartbeatCounter,
-            sent ? "true" : "false");
+        // Only log every 10th heartbeat to reduce serial spam now that buttons are the focus
+        if (heartbeatCounter % 10 == 0) {
+            printTimestamp();
+            Serial.printf("HEARTBEAT #%d (every 10th logged)\n", heartbeatCounter);
+        }
     }
 
     // Track connection state transitions
@@ -204,13 +236,12 @@ void loop() {
     }
     if (!wasConnected && deviceConnected) {
         wasConnected = true;
-        heartbeatCounter = 0;  // Reset on new connection
+        heartbeatCounter = 0;
         printTimestamp();
         Serial.println("State: DISCONNECTED -> CONNECTED (counter reset)");
     }
 
     // Re-start advertising every 30 seconds when not connected
-    // NimBLE may silently stop advertising — this ensures we stay discoverable
     if (!deviceConnected && (now - lastAdvRestart >= 30000)) {
         lastAdvRestart = now;
         NimBLEDevice::getAdvertising()->start();
@@ -218,15 +249,15 @@ void loop() {
         Serial.println("ADV: Re-started advertising (periodic refresh)");
     }
 
-    // Memory report every 10 seconds
-    if (now - lastMemReport >= 10000) {
+    // Memory report every 30 seconds (reduced from 10s)
+    if (now - lastMemReport >= 30000) {
         lastMemReport = now;
         printTimestamp();
-        Serial.printf("STATUS: heap=%d bytes | connected=%s | heartbeats=%d | adv_active\n",
+        Serial.printf("STATUS: heap=%d | connected=%s | heartbeats=%d\n",
             ESP.getFreeHeap(),
             deviceConnected ? "YES" : "NO",
             heartbeatCounter);
     }
 
-    delay(10);  // Small delay to prevent watchdog issues
+    delay(5);  // 5ms loop = 200Hz button polling (was 10ms)
 }

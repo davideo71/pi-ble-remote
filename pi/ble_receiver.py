@@ -42,13 +42,28 @@ def log(msg, level="INFO"):
     print(f"{ts()} [{level:5s}] {msg}", flush=True)
 
 
+BUTTON_NAMES = {
+    'L': 'LEFT press', 'l': 'LEFT release',
+    'R': 'RIGHT press', 'r': 'RIGHT release',
+    'U': 'UP press', 'u': 'UP release',
+    'D': 'DOWN press', 'd': 'DOWN release',
+    'O': 'ON/OFF press', 'o': 'ON/OFF release',
+}
+
+
 def notification_handler(characteristic, data: bytearray):
     """Called for every BLE notification received."""
     hex_str = data.hex()
-    # Try to decode as uint32 heartbeat counter
-    if len(data) == 4:
+
+    # Single byte = button event (ASCII char)
+    if len(data) == 1:
+        char = chr(data[0])
+        name = BUTTON_NAMES.get(char, f"unknown({char})")
+        log(f"BUTTON: '{char}' → {name}")
+    # 4 bytes = heartbeat counter
+    elif len(data) == 4:
         value = struct.unpack("<I", data)[0]
-        log(f"NOTIFICATION: raw={hex_str} decoded=heartbeat#{value}")
+        log(f"HEARTBEAT #{value}")
     else:
         log(f"NOTIFICATION: raw={hex_str} ({len(data)} bytes)")
 
