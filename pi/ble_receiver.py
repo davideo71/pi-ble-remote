@@ -24,7 +24,7 @@ KNOWN_MAC = "38:44:BE:45:AD:86"  # ESP32-C3 BLE address (for pre-scan cache clea
 
 # Timing — tuned for fast reconnection
 SCAN_TIMEOUT = 8.0         # max seconds to scan (usually finds device in <1s)
-CONNECT_TIMEOUT = 10.0     # seconds to wait for connection
+CONNECT_TIMEOUT = 15.0     # seconds to wait for connection (10s caused early timeouts)
 RECONNECT_DELAY = 1.0      # seconds between reconnection attempts (fast!)
 MAX_RECONNECT_DELAY = 10.0 # max backoff delay
 
@@ -81,8 +81,11 @@ async def scan_for_device():
         log("Quick scan failed, falling back to full scan with adapter reset", "WARN")
 
     # Full scan path: reset adapter to clear BlueZ duplicate filter
-    addr_to_remove = connected_address or KNOWN_MAC
-    await remove_bluez_device(addr_to_remove)
+    # Only remove from BlueZ cache on first scan (no cached address yet).
+    # Removing every time forces BlueZ to re-establish from scratch and
+    # causes multiple failed connection attempts (Test 16 regression).
+    if not connected_address:
+        await remove_bluez_device(KNOWN_MAC)
     await reset_bluetooth_adapter()
 
     log(f"Scanning for BLE devices (max {SCAN_TIMEOUT}s, early exit on match)...")
