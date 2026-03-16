@@ -1,8 +1,8 @@
 # Pi Test Report: Step 1 BLE Connection Test
 
-## Test 19 — 2026-03-16 23:16 UTC (direct MAC reconnect, skip scanning)
+## Test 20 — 2026-03-16 23:22 UTC (pre-emptive adapter reset on reconnect)
 
-**Duration:** ~120 seconds
+**Duration:** ~150 seconds
 
 ### Environment
 
@@ -11,50 +11,49 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: Cold start good, reconnect path works but BlueZ InProgress blocks it
+### Result: ROUGH RUN — Connected after 6 attempts, direct reconnect NOT tested
 
-#### Cold start: First-attempt success (again!)
-- Device found as **device #3** in scan — early exit after **0.8 seconds**
-- Matched by **UUID**, device name "BLE-Remote" (correct)
-- Connected in **11.5 seconds** (slower than Test 18's 3.5s — variable)
-- First heartbeat at 23:16:56.7
-- **Script start → first heartbeat: ~18 seconds** (3.2s reset + 0.8s scan + 11.5s connect + 2s subscribe)
+#### Connection attempts (cold start)
+1. **(23:22:26)** Found in 0.3s by UUID. Disconnected during service discovery after 13s. Error: "failed to discover services, device disconnected"
+2. **(23:22:44)** Found in 0.9s by UUID. Connection timed out after 19s.
+3. **(23:23:09)** "No powered Bluetooth adapters" — adapter reset timing issue.
+4. **(23:23:14)** Recovery: `bluetoothctl remove` triggered after 3 failures. Found in 5.4s. Connection timed out after 19s.
+5. **(23:23:44)** "No powered adapters" again.
+6. **(23:23:49)** Found in 0.4s. **CONNECTED** after 9.8s — SUCCESS.
 
-#### Stability: 93 seconds, 48 heartbeats
-- **48 consecutive heartbeats** (#5-#48), every ~2 seconds, zero gaps
-- Connection held from 23:16:54 to 23:18:29 — **93 seconds**
-- Natural disconnect at 23:18:29 (not forced — ESP32 may have dropped or supervision timeout)
+**Script start → first heartbeat: ~100 seconds** (5 failed attempts)
 
-#### Reconnection: Direct MAC connect triggered
-- After disconnect, the new direct-connect path activated correctly:
-  - `"Direct connect to known address 38:44:BE:45:AD:86 (no scan)..."`
-  - No adapter reset, no scan — went straight to connect
-- **BUT: BlueZ "InProgress" error fired immediately** (within 16ms of connect attempt)
-- Adapter reset triggered (3.2 seconds)
-- Second direct-connect attempt started but test timed out before result
+#### Once connected (23:23:59 — 23:24:52+, test timeout)
+- **25 heartbeats** (#5-#29), every ~2 seconds, zero gaps
+- Stable for 53+ seconds — still alive at test timeout
 
-#### Timing breakdown
+#### Direct-MAC reconnect: NOT TESTED
+The direct reconnect path (`connect_and_listen_by_address()`) was never triggered because:
+- The initial connection failed before `connected_address` was set
+- So the code fell back to the scan-based path on every retry
+- The connection finally succeeded but didn't disconnect again during the test
 
-| Phase | Test 18 | Test 19 |
-|-------|---------|---------|
-| Adapter reset | 3.2s | 3.2s |
-| Scan | 0.4s | 0.8s |
-| Connection | 3.5s | **11.5s** |
-| Subscribe | 1.1s | 1.5s |
-| **Total cold start** | **8.8s** | **~18s** |
+#### "No powered adapters" is back
+The 3s adapter reset (1s off + 2s on) produced "No powered adapters" errors **twice** in this run (attempts 3 and 5). This didn't happen in Test 18 but has appeared intermittently. The timing may be marginal — 2s after power-on might not always be enough for BlueZ to fully initialize.
 
-The connection time is quite variable (3.5s vs 11.5s). This is likely BlueZ/BLE negotiation variance, not a code issue.
+### Analysis: Connection reliability has degraded
 
-### Answer to key question
+| Test | Cold start attempts | Time to heartbeat |
+|------|-------------------|-------------------|
+| 18 | **1** | **9s** |
+| 19 | **1** | 18s |
+| 20 | **6** | **100s** |
 
-**How fast is reconnection?** The direct-MAC path activated correctly and skipped scanning, but **BlueZ "InProgress" always fires after a disconnect**, requiring a 3.2s adapter reset before the reconnect can proceed. Estimated reconnect time: ~1s delay + 0.016s (InProgress) + 3.2s reset + connect time (~4-12s) = **~8-16 seconds**.
+The code is essentially the same across these tests. The main variable is BLE connection reliability, which appears to fluctuate significantly. Possible factors:
+- **BlueZ internal state** accumulates across runs (not fully cleared by adapter reset)
+- **RF environment** changes (interference from other 2.4GHz devices)
+- **ESP32 advertising state** — the periodic re-advertising may have edge cases
+- **Connection timing** — BLE connection is inherently probabilistic
 
-The "InProgress" error after disconnect appears to be unavoidable with BlueZ — it seems to need an adapter reset to clear its internal connection state. The direct-connect optimization saves the scan time (~1-4s) but can't avoid the reset.
-
-### Suggestion
-- The direct-MAC reconnect path is working correctly — keep it
-- Consider pre-emptively doing the adapter reset immediately on disconnect (before the 1s reconnect delay) to overlap the timing
-- The connection time variability (3.5-11.5s) suggests the ESP32 may sometimes need multiple connection intervals to respond — could be improved with shorter connection intervals on the ESP32 side
+### Suggestions
+1. **Increase adapter reset wait to 3s** (1s off + **3s** on) to eliminate "No powered adapters" errors
+2. **Set `connected_address` from KNOWN_MAC at startup** so the direct-connect path is available even before the first successful connection
+3. Consider that connection reliability may never be 100% on first attempt — the retry loop is the right strategy, focus on making retries fast
 
 ---
 
@@ -62,6 +61,7 @@ The "InProgress" error after disconnect appears to be unavoidable with BlueZ —
 
 | Test | Result |
 |------|--------|
+| 20 (23:22) | Rough run — 6 attempts to connect, direct reconnect not tested, adapter errors |
 | 19 (23:16) | Cold start OK (~18s), direct reconnect works but InProgress blocks, 93s stable |
 | 18 (23:04) | **PERFECT** — first-attempt connect, 9s to heartbeat, 111s stable |
 | 17 (22:56) | Improved — 2nd attempt connect, 49s to heartbeat |
