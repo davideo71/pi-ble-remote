@@ -2,21 +2,22 @@
 
 ## What to do
 1. `git pull` to get the latest code
-2. Run `python3 pi/ble_receiver.py` for about 90-120 seconds (at least 3 scan cycles)
+2. Run `python3 pi/ble_receiver.py` for about **3-4 minutes** (we need to see if connections last longer than 25-27 seconds now)
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 13)
-1. **ESP32: TX power reduced to +9 dBm** (was +20 dBm). Cheap ESP32-C3 Super Mini clones have poor RF matching — max power can distort the signal. Lower power = cleaner signal.
-2. **ESP32: fast advertising interval 20-60ms** (was default ~1280ms).
-3. **ESP32: flash erased and reflashed** — completely clean NVS/BLE state.
-4. **Pi: adapter reset before EVERY scan** — `reset_bluetooth_adapter()` now runs before each scan cycle. This clears BlueZ's internal duplicate filter.
-5. **Pi: active scanning enabled** — `scanning_mode="active"` forces scan requests, triggering the ESP32's scan response.
+## What changed this iteration (Test 14)
+1. **ESP32: relaxed connection parameters** — on connect, the ESP32 now requests: interval 30-60ms, latency 0, supervision timeout **6 seconds** (was likely default ~2s). This should fix the ~25-second disconnects.
+2. **ESP32: heartbeat notify() return value logged** — to diagnose the "Connection 2 had no heartbeats" issue from Test 13.
+3. **Pi code: unchanged** — adapter reset + active scanning already working well.
+4. **ESP32: flash erased and reflashed** — clean state.
 
 ## Expected
-- The combination of lower TX power + adapter reset + active scanning should make the ESP32 reliably visible
-- Compare RSSI to previous tests (was -81 to -89 dBm at +20 dBm power)
-- If found → connect → subscribe to notifications → report heartbeat data
-- Report whether the adapter reset adds noticeable delay
+- Discovery should still be reliable (as in Test 13: 16 hits in one scan)
+- Connections should last **much longer than 25 seconds** now
+- Heartbeat notifications every ~2 seconds
+- If a connection still drops, check the disconnect reason code in the ESP32 serial logs
 
-## Key question to answer
-Does the ESP32 show up **consistently** across multiple scan cycles?
+## Key questions to answer
+1. Do connections survive past the 25-27 second mark?
+2. Do heartbeats arrive consistently on every connection (not just 2 of 3)?
+3. Does auto-reconnect still work reliably?

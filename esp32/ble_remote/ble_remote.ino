@@ -53,6 +53,14 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             connInfo.getConnTimeout() * 10);
         printTimestamp();
         Serial.printf("  Free heap: %d bytes\n", ESP.getFreeHeap());
+
+        // Request relaxed connection parameters from the central (Pi)
+        // Interval: 24-48 (30-60ms), Latency: 0, Supervision timeout: 600 (6 seconds)
+        // The 25-second disconnect was likely due to a tight default supervision timeout
+        // combined with BlueZ connection parameter negotiation
+        pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 600);
+        printTimestamp();
+        Serial.println("  Requested conn params: interval=30-60ms, latency=0, timeout=6000ms");
     }
 
     void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
@@ -180,10 +188,12 @@ void loop() {
 
         // Pack counter as 4 bytes (little-endian)
         pButtonChar->setValue(heartbeatCounter);
-        pButtonChar->notify();
+        bool sent = pButtonChar->notify();
 
         printTimestamp();
-        Serial.printf("HEARTBEAT #%d sent (value: %d)\n", heartbeatCounter, heartbeatCounter);
+        Serial.printf("HEARTBEAT #%d notify_returned=%s\n",
+            heartbeatCounter,
+            sent ? "true" : "false");
     }
 
     // Track connection state transitions
