@@ -155,6 +155,37 @@ async def remove_bluez_device(address):
     await asyncio.sleep(0.3)
 
 
+async def connect_and_listen_by_address(address):
+    """Connect directly by MAC address (skip scanning). Used for reconnection."""
+    global connected_address
+
+    log(f"Connecting to {address} by address (timeout={CONNECT_TIMEOUT}s)...")
+
+    async with BleakClient(
+        address,
+        disconnected_callback=disconnected_callback,
+        timeout=CONNECT_TIMEOUT,
+    ) as client:
+        log("========== CONNECTED (direct) ==========")
+        log(f"  Address: {client.address}")
+        log(f"  MTU: {client.mtu_size}")
+        connected_address = client.address
+
+        # Subscribe to button characteristic
+        log(f"Subscribing to notifications on {BUTTON_CHAR_UUID}...")
+        await client.start_notify(BUTTON_CHAR_UUID, notification_handler)
+        log("Subscribed - listening for notifications")
+        log("--------------------------------------------")
+
+        # Stay connected and print a status line periodically
+        while client.is_connected:
+            await asyncio.sleep(5.0)
+            if client.is_connected:
+                log(f"STATUS: connected={client.is_connected} mtu={client.mtu_size}")
+
+    log("Connection closed (BleakClient exited)")
+
+
 async def connect_and_listen(device):
     """Connect to the device, subscribe, and listen until disconnect."""
     global connected_address
@@ -236,7 +267,15 @@ async def main():
                 await remove_bluez_device(addr_to_remove)
                 consecutive_failures = 0
 
-            # Scan
+            # Fast path: if we've connected before, skip scanning entirely
+            # and connect directly by MAC address
+            if connected_address:
+                log(f"Direct connect to known address {connected_address} (no scan)...")
+                await connect_and_listen_by_address(connected_address)
+                consecutive_failures = 0
+                continue
+
+            # Cold start: need to scan to find the device
             device = await scan_for_device()
             if device is None:
                 consecutive_failures += 1
