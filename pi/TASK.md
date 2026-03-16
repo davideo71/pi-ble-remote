@@ -5,16 +5,15 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 26)
-**ESP32 now sends simulated button presses** — cycles through all 5 buttons (L, R, U, D, O) automatically every 500ms when connected. Press+release pairs. No manual button pressing needed.
+## What changed this iteration (Test 27)
+No code changes. **ESP32 has been freshly reset and is confirmed advertising.** The previous test failures (24-26) were likely due to ESP32 being reflashed/reset from the Mac side during the test window.
 
-This tests the full button pipeline end-to-end without human timing issues.
+ESP32 firmware sends simulated button presses (cycling L, R, U, D, O every 500ms) plus heartbeats every 2s.
 
 ## Expected
 - Connection on first attempt
-- Automatic button events: L/l, R/r, U/u, D/d, O/o cycling continuously
-- Heartbeats still flowing between button events
-- Log shows `BUTTON: 'L' → LEFT press` etc.
+- Simulated button events cycling through all 5 buttons
+- Heartbeats between button events
 
 ## Key question
-Do all 5 button events arrive and get decoded correctly? Any dropped events?
+Do button events arrive and decode correctly? This is the same test as 26 but with a confirmed-good ESP32.
