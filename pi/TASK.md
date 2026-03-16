@@ -5,14 +5,16 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 25)
-**Reverted to full adapter reset.** The light reset (disconnect + hci reset) was unreliable — Test 24 had 8 failed attempts, all hitting InProgress. Back to the proven full power cycle (1s off + 3s on = 4s).
+## What changed this iteration (Test 26)
+**ESP32 now sends simulated button presses** — cycles through all 5 buttons (L, R, U, D, O) automatically every 500ms when connected. Press+release pairs. No manual button pressing needed.
 
-Buttons are soldered and will be pressed during the test.
+This tests the full button pipeline end-to-end without human timing issues.
 
 ## Expected
-- Connection on first attempt (~13s cold start like Test 21)
-- Button events arriving as `BUTTON: 'L' → LEFT press` etc.
+- Connection on first attempt
+- Automatic button events: L/l, R/r, U/u, D/d, O/o cycling continuously
+- Heartbeats still flowing between button events
+- Log shows `BUTTON: 'L' → LEFT press` etc.
 
 ## Key question
-Does the full adapter reset restore reliable connections? Do button events arrive?
+Do all 5 button events arrive and get decoded correctly? Any dropped events?

@@ -213,6 +213,24 @@ void loop() {
         }
     }
 
+    // ---- Simulated button presses for testing (cycle all 5 buttons every 5s) ----
+    static unsigned long lastSimButton = 0;
+    static int simButtonIndex = 0;
+    static bool simPressed = false;
+    if (deviceConnected && (now - lastSimButton >= 500)) {
+        lastSimButton = now;
+        if (!simPressed) {
+            // Send press
+            sendButton(buttons[simButtonIndex].pressChar);
+            simPressed = true;
+        } else {
+            // Send release, advance to next button
+            sendButton(buttons[simButtonIndex].releaseChar);
+            simPressed = false;
+            simButtonIndex = (simButtonIndex + 1) % NUM_BUTTONS;
+        }
+    }
+
     // ---- Heartbeat every 2s (keeps connection alive, useful for monitoring) ----
     if (deviceConnected && (now - lastHeartbeat >= 2000)) {
         lastHeartbeat = now;
