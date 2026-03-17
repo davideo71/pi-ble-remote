@@ -1,5 +1,35 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 38c — 2026-03-17 21:38 UTC (quick scan after erase+reflash)
+
+**Duration:** 1 broad scan × 15 seconds
+
+### Result: FAIL — still "EasyPlay", no "BLE-Remote"
+
+#### All devices found
+```
+  38:44:BE:45:AD:86  RSSI=-83  name=EasyPlay  UUIDs=['4e520001-...']  <-- STILL OLD NAME
+  69:58:F5:64:27:04  RSSI=-84  name=S41 152A LE
+  7E:5B:39:26:13:D5  RSSI=-85  name=None
+  A8:51:AB:8F:DE:49  RSSI=-88  name=None
+  94:E6:BA:80:A1:6B  RSSI=-88  name=IAe-65" The Frame
+  5C:5A:2F:BC:25:07  RSSI=-88  name=None
+  67:B3:A0:41:0E:07  RSSI=-89  name=LE-My oaces of quiet
+  6A:81:E4:03:F6:3A  RSSI=-90  name=None
+  CE:D1:40:53:ED:10  RSSI=-90  name=None
+  Total: 9 devices
+```
+
+**No "BLE-Remote" found.** The C3 at `38:44:BE:45:AD:86` is still advertising as "EasyPlay" with the correct service UUID.
+
+#### Theory
+The flash erase + reflash is not taking effect on this board. The old firmware persists. Possible causes:
+- Wrong serial port being used for flash
+- ESP32-C3 has a second flash partition that wasn't erased
+- There may be a **different ESP32 board** (not the C3 being flashed) that's still powered on and advertising "EasyPlay"
+
+---
+
 ## Test 38b — 2026-03-17 21:18 UTC (rescan after C3 reset)
 
 **Duration:** 2 broad scans × 15 seconds each
