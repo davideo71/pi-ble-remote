@@ -1,14 +1,13 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server (with external antenna)
  *
- * Test 40: Force NVS erase to kill "EasyPlay" ghost name
+ * Test 41: Clean BLE init (NVS erase removed — it killed NimBLE)
  * LED patterns:
  *   - Slow blink (1s on/1s off): Advertising, waiting for connection
  *   - Solid ON: Connected
  */
 
 #include <NimBLEDevice.h>
-#include <nvs_flash.h>
 
 // Custom UUIDs for our remote service
 #define SERVICE_UUID        "4e520001-7354-4288-9a71-81a9bf56c4a8"
@@ -97,14 +96,10 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
 
-    // FORCE erase ALL NVS data to kill any cached "EasyPlay" name
-    nvs_flash_erase();
-    nvs_flash_init();
-
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 + Antenna");
-    Serial.println("  Test 40: NVS erase in firmware");
+    Serial.println("  Test 41: Clean BLE (no NVS erase)");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Chip: %s Rev %d | Cores: %d | CPU: %dMHz\n",
