@@ -1,5 +1,70 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 37 — 2026-03-17 20:40 UTC (C3 with antenna, clean slate — find "BLE-Remote")
+
+**Duration:** 3 broad scans × 15 seconds each
+**Pi state:** Fresh BLE cache clear (`rm -rf /var/lib/bluetooth/*/`), bluetooth restarted
+**Goal:** Find device named "BLE-Remote" at MAC `38:44:BE:45:AD:84`
+
+### Result: FAIL — "BLE-Remote" NOT found. "EasyPlay" still present.
+
+#### Cache clearing
+- Stopped bluetooth, deleted all `/var/lib/bluetooth/*/`, restarted, waited 5s
+- Confirmed clean slate — first scan showed no cached names
+
+#### Scan results (3 scans, 15s each)
+
+**Scan 1** (immediately after cache clear): 6 devices, NO "BLE-Remote", NO "EasyPlay"
+```
+  E4:E2:7D:E3:72:F2  RSSI= -81  name=None
+  94:E6:BA:80:A1:6B  RSSI= -84  name=IAe-65" The Frame
+  44:DA:21:14:E5:F0  RSSI= -85  name=S41 152A LE
+  A8:51:AB:8F:DE:49  RSSI= -85  name=None
+  66:32:47:D7:EC:AA  RSSI= -89  name=None
+  6E:1A:95:A6:DF:FC  RSSI= -89  name=None
+```
+
+**Scan 2**: 7 devices — "EasyPlay" appears at `38:44:BE:45:AD:86`
+```
+  44:DA:21:14:E5:F0  RSSI= -81  name=S41 152A LE
+  6E:1A:95:A6:DF:FC  RSSI= -81  name=None
+  38:44:BE:45:AD:86  RSSI= -83  name=EasyPlay  UUIDs=['4e520001-...']  <-- WRONG NAME
+  94:E6:BA:80:A1:6B  RSSI= -84  name=IAe-65" The Frame
+  66:32:47:D7:EC:AA  RSSI= -85  name=None
+  E4:E2:7D:E3:72:F2  RSSI= -86  name=None
+  A8:51:AB:8F:DE:49  RSSI= -89  name=None
+```
+
+**Scan 3**: Same — "EasyPlay" at `38:44:BE:45:AD:86`, RSSI -83
+```
+  38:44:BE:45:AD:86  RSSI= -83  name=EasyPlay  UUIDs=['4e520001-...']  <-- WRONG NAME
+  6E:1A:95:A6:DF:FC  RSSI= -84  name=None
+  44:DA:21:14:E5:F0  RSSI= -85  name=S41 152A LE
+  E4:E2:7D:E3:72:F2  RSSI= -86  name=None
+  94:E6:BA:80:A1:6B  RSSI= -88  name=IAe-65" The Frame
+  66:32:47:D7:EC:AA  RSSI= -89  name=None
+  A8:51:AB:8F:DE:49  RSSI= -89  name=None
+```
+
+#### Key findings
+1. **"BLE-Remote" does NOT exist** — not found in any of 3 scans after full cache clear
+2. **"EasyPlay" at `38:44:BE:45:AD:86`** is the only ESP32 visible — with the correct service UUID
+3. **MAC is `:AD:86`**, not `:AD:84` as expected in TASK.md
+4. **The device name "EasyPlay" is coming from the firmware**, not from BlueZ cache — confirmed because cache was fully cleared and device still advertises as "EasyPlay"
+5. RSSI: -83 dBm consistently
+
+#### Conclusion
+The ESP32-C3 firmware is advertising as **"EasyPlay"**, not **"BLE-Remote"**. This is NOT a BlueZ caching issue — the cache was completely wiped and the device still shows up as "EasyPlay". The firmware's `NimBLEDevice::init("...")` call likely has "EasyPlay" as the device name.
+
+Also the MAC `38:44:BE:45:AD:86` differs from the expected `38:44:BE:45:AD:84` — please verify which board/MAC is correct.
+
+#### Suggestion for Mac-Claude
+- Check the firmware source: is `NimBLEDevice::init()` using "BLE-Remote" or "EasyPlay"?
+- Verify the ESP32-C3 board MAC — is it actually `...AD:84` or `...AD:86`?
+- Re-flash if needed, then push a new TASK.md and I'll re-test
+
+---
+
 ## Test 36b — 2026-03-17 20:12 UTC (C3 with external antenna, fresh Pi reboot)
 
 **Duration:** 2 minutes (timeout)
