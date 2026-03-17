@@ -271,22 +271,41 @@ async def light_reset(address):
         await reset_bluetooth_adapter()
 
 
-async def reset_bluetooth_adapter():
+async def reset_bluetooth_adapter(clear_cache=False):
     """Reset the BlueZ adapter to recover from stuck states.
 
-    Timing: 1s off + 3s on = 4s total. 2s on-wait was marginal and
-    intermittently caused "No powered Bluetooth adapters found" —
-    BlueZ LE subsystem needs the full 3s after power-on.
+    Args:
+        clear_cache: If True, stop bluetooth, delete on-disk cache, then restart.
+                     This prevents BlueZ from regenerating cache from memory.
+                     Use on startup and after multiple failures.
+
+    Timing: ~4-5s total. BlueZ LE subsystem needs 3s after power-on.
     """
-    log("Cycling Bluetooth adapter off/on...")
-    try:
-        subprocess.run(["bluetoothctl", "power", "off"], capture_output=True, timeout=5)
-        await asyncio.sleep(1)
-        subprocess.run(["bluetoothctl", "power", "on"], capture_output=True, timeout=5)
-        await asyncio.sleep(3)
-        log("Bluetooth adapter reset complete")
-    except Exception as e:
-        log(f"Adapter reset failed: {e}", "ERROR")
+    if clear_cache:
+        log("Full BT reset: stop → clear cache → start...")
+        try:
+            subprocess.run(["sudo", "systemctl", "stop", "bluetooth"],
+                           capture_output=True, timeout=10)
+            await asyncio.sleep(1)
+            # Delete cache while bluetooth is STOPPED (prevents regeneration from memory)
+            subprocess.run(["sudo", "bash", "-c", "rm -rf /var/lib/bluetooth/*/cache/*"],
+                           capture_output=True, timeout=5)
+            subprocess.run(["sudo", "systemctl", "start", "bluetooth"],
+                           capture_output=True, timeout=10)
+            await asyncio.sleep(3)
+            log("Full BT reset complete (cache cleared)")
+        except Exception as e:
+            log(f"Full reset failed: {e}", "ERROR")
+    else:
+        log("Cycling Bluetooth adapter off/on...")
+        try:
+            subprocess.run(["bluetoothctl", "power", "off"], capture_output=True, timeout=5)
+            await asyncio.sleep(1)
+            subprocess.run(["bluetoothctl", "power", "on"], capture_output=True, timeout=5)
+            await asyncio.sleep(3)
+            log("Bluetooth adapter reset complete")
+        except Exception as e:
+            log(f"Adapter reset failed: {e}", "ERROR")
 
 
 async def main():
@@ -300,15 +319,11 @@ async def main():
     log(f"Service UUID:  {SERVICE_UUID}")
     log(f"Char UUID:     {BUTTON_CHAR_UUID}")
 
-    # Clean BlueZ state on startup — prevents accumulated failures
-    log("Restarting bluetooth service for clean state...")
-    try:
-        subprocess.run(["sudo", "systemctl", "restart", "bluetooth"],
-                       capture_output=True, timeout=10)
-        await asyncio.sleep(3)
-        log("Bluetooth service restarted")
-    except Exception as e:
-        log(f"Service restart failed (continuing): {e}", "WARN")
+    # Clean BlueZ state on startup — stop, clear cache, restart
+    # This prevents stale cached device info from causing connection timeouts
+    await reset_bluetooth_adapter(clear_cache=True)
+    # Also remove our specific device from BlueZ to force fresh discovery
+    await remove_bluez_device(KNOWN_MAC)
     print("--------------------------------------------\n")
 
     global connected_address
@@ -318,16 +333,10 @@ async def main():
 
     while True:
         try:
-            # After 3 consecutive failures, restart bluetooth service to clear degraded state
+            # After 3 consecutive failures, full reset with cache clear
             if consecutive_failures >= 3:
-                log(f"Recovery: restarting bluetooth service after {consecutive_failures} failures", "WARN")
-                try:
-                    subprocess.run(["sudo", "systemctl", "restart", "bluetooth"],
-                                   capture_output=True, timeout=10)
-                    await asyncio.sleep(3)
-                    log("Bluetooth service restarted for recovery")
-                except Exception as e:
-                    log(f"Service restart failed: {e}", "WARN")
+                log(f"Recovery: full BT reset + cache clear after {consecutive_failures} failures", "WARN")
+                await reset_bluetooth_adapter(clear_cache=True)
                 addr_to_remove = connected_address or KNOWN_MAC
                 await remove_bluez_device(addr_to_remove)
                 connected_address = None  # Force fresh scan after restart
