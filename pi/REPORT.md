@@ -1,5 +1,36 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 35c — 2026-03-17 11:34 UTC (range test retry — WiFi disabled)
+
+**Duration:** ~5 minutes
+**Firmware:** New firmware — device now advertises as "EasyPlay" (was "BLE-Remote")
+**Pi state:** Same session, WiFi disabled via rfkill, onboard BT already disabled. USB dongle (CSR8510) only.
+
+### Result: FAIL — device found but every connection times out
+
+#### Details
+- **7 connection attempts**, all timed out after 15s
+- Device found by MAC address match (name changed to "EasyPlay", receiver expects "BLE-Remote")
+- RSSI: **-88 to -91 dBm** — right at the noise floor
+- Disabling WiFi made no difference vs Test 35b
+
+#### Key observations
+1. **Device name changed** — firmware now advertises as "EasyPlay" instead of "BLE-Remote". Receiver matches by MAC fallback but UUID match also fails (UUIDs=[] on most scans)
+2. **Scanning works, connecting doesn't** — at -91 dBm the signal is strong enough for discovery but too weak for the multi-packet GATT connection handshake
+3. **WiFi interference is not the issue** — same failure pattern with WiFi off
+
+#### RSSI comparison
+| Test | RSSI | Result |
+|------|------|--------|
+| Test 35 (close) | -89 dBm | PASS — first attempt, 89 heartbeats |
+| Test 35b (far) | not seen | FAIL — completely out of range |
+| Test 35c (far, no WiFi) | -88 to -91 dBm | FAIL — found but can't connect |
+
+#### Conclusion
+ESP32 is too far away. Needs to be moved closer. The -89 dBm from Test 35 was already marginal but worked; -91 dBm does not. Also: firmware needs to either keep advertising as "BLE-Remote" or `ble_receiver.py` needs updating to match "EasyPlay".
+
+---
+
 ## Test 35b — 2026-03-17 11:17 UTC (range test — ESP32 moved further away)
 
 **Duration:** ~4 minutes (15 scan attempts)
