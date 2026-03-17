@@ -5,23 +5,22 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 32b — retry)
-ESP32 was power-cycled on March 17 and should now be advertising again. Previous attempt failed because ESP32 was offline.
+## What changed this iteration (Test 33)
+**Test 32b FAILED** — all connections timed out or disconnected during service discovery, even at 10ms delay. Loop delay is NOT the root cause.
 
-**Test 32 was PARTIAL** — button polling at 5ms (200Hz) starved NimBLE on the single-core C3. Heartbeats had gaps/bursts and connection dropped after 48s.
+Test 33: **Same as Test 32b but with Serial.printf REMOVED from button event handling.** Everything else is identical — same digitalRead polling on 5 pins, same debounce logic, same 10ms loop delay. We're testing whether Serial.printf in the button handler was blocking long enough to disrupt NimBLE.
 
-Test 32b: **Same as Test 32 but with 10ms loop delay** (100Hz polling instead of 200Hz). This gives NimBLE more processing time between digitalRead calls.
-
-Note: User also moved the ESP32 further from the Pi between tests. RSSI may be different.
+ESP32 will need to be re-flashed and power-cycled before this test.
 
 ## Incremental progress
 | Test | Added | Loop delay | Result |
 |------|-------|-----------|--------|
 | 30 | Heartbeat only | 10ms | PASS (73s+) |
 | 31 | + GPIO init | 10ms | PASS (78s+) |
-| 32 | + button read (serial) | **5ms** | PARTIAL (48s, irregular heartbeats) |
-| **32b** | + button read (serial) | **10ms** | **?** |
+| 32 | + button read + serial output | **5ms** | PARTIAL (48s, irregular heartbeats) |
+| 32b | + button read + serial output | **10ms** | FAIL (all connections timeout) |
+| **33** | + button read, **NO serial on events** | **10ms** | **?** |
 
 ## Expected
-- If 10ms fixes it: 5ms was too aggressive for single-core C3 + NimBLE
-- If still unstable: digitalRead itself is the problem regardless of timing
+- If PASS: Serial.printf was the culprit — it blocks long enough to disrupt NimBLE radio timing
+- If FAIL: digitalRead itself or the debounce logic is the problem → try interrupt-driven buttons next

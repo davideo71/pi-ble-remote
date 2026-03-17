@@ -1,9 +1,9 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server
  *
- * Test 32b: Heartbeat + button reading (serial only), 10ms loop delay.
- * Same as Test 32 but with delay(10) instead of delay(5).
- * Test 32 showed 5ms polling starves NimBLE on single-core C3.
+ * Test 33: Heartbeat + button reading (NO serial output on button events), 10ms loop delay.
+ * Test 32b failed with serial printf on button events — testing if Serial.printf
+ * in the polling loop is what disrupts NimBLE on the single-core C3.
  */
 
 #include <NimBLEDevice.h>
@@ -117,7 +117,7 @@ void setup() {
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 GATT Server");
-    Serial.println("  Test 32b: Button read, 10ms loop delay");
+    Serial.println("  Test 33: Button read, NO serial on events, 10ms");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Boot reason: %d\n", esp_reset_reason());
@@ -188,11 +188,7 @@ void loop() {
         if ((now - buttons[i].lastDebounceTime) >= DEBOUNCE_MS) {
             if (reading != buttons[i].pressed) {
                 buttons[i].pressed = reading;
-                // Log to serial only — do NOT send over BLE
-                printTimestamp();
-                Serial.printf("BUTTON (serial only): '%c' [GPIO %d]\n",
-                    reading ? buttons[i].pressChar : buttons[i].releaseChar,
-                    buttons[i].pin);
+                // No serial output here — testing if Serial.printf disrupts NimBLE
             }
         }
     }
@@ -219,7 +215,7 @@ void loop() {
         wasConnected = true;
         heartbeatCounter = 0;
         printTimestamp();
-        Serial.println("State: DISCONNECTED -> CONNECTED (button read, serial only)");
+        Serial.println("State: DISCONNECTED -> CONNECTED (button read, no serial on events)");
     }
 
     // Re-start advertising every 30 seconds when not connected
@@ -240,5 +236,5 @@ void loop() {
             heartbeatCounter);
     }
 
-    delay(10);  // 10ms loop (100Hz) — 5ms was starving NimBLE on single-core C3
+    delay(10);  // 10ms loop (100Hz)
 }
