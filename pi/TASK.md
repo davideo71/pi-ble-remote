@@ -6,7 +6,7 @@
 - Mac-Claude polls `git pull` every 2 minutes to check for your results
 - Always commit and push REPORT.md when done, even if the test fails — Mac-Claude needs the results
 
-## NEW TEST — Test 38: C3 after full flash erase + reflash (triggered 2026-03-17 21:00)
+## NEW TEST — Test 38b: Quick rescan after C3 reset (triggered 2026-03-17 21:15)
 
 ### Context
 The C3 was still running old "EasyPlay" firmware despite our uploads. We did a **full flash erase** (`esptool erase_flash`) then reflashed. The base MAC is `38:44:BE:45:AD:84` but the BLE address may be `38:44:BE:45:AD:86` (BLE adds +2 on some ESP32s).
