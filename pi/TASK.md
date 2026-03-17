@@ -2,15 +2,15 @@
 
 ## What to do
 1. `git pull` to get the latest code
-2. **Confirm Pi was freshly rebooted** — check uptime (`uptime`)
-3. Run `python3 pi/ble_receiver.py` for about **2 minutes**
-4. Update `pi/REPORT.md` with results (include uptime), commit and push
+2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
+3. Update `pi/REPORT.md` with results (include RSSI), commit and push
 
-## What changed this iteration (Test 35 — fresh reboot + interrupt buttons)
-Pi was just rebooted to clear all accumulated BlueZ/adapter state. Test 31b proved the baseline had degraded — same firmware that connected instantly at 01:14 took 8 attempts at 10:53 after 20+ test cycles.
+## What changed this iteration (Test 35b — range test)
+**No firmware or Pi changes.** Same interrupt-driven button firmware, same fresh Pi session. ESP32 has been moved to a different (likely further) location.
 
-Firmware is Test 34 (interrupt-driven buttons, no digitalRead polling). This is the first fair test of this firmware on a clean Pi.
+Test 35 passed perfectly at -89 dBm. This test checks if the connection holds at the new distance.
 
 ## Expected
-- If PASS on first or second attempt: confirms Pi state was the problem, interrupt-driven buttons work fine
-- If FAIL: firmware genuinely has issues — need to revisit approach
+- Note the RSSI compared to Test 35 (-89 dBm)
+- If PASS: we have good range and can proceed to adding BLE button notifications
+- If FAIL: we know the range limit and need to keep the ESP32 closer
