@@ -1,5 +1,52 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 39b — 2026-03-17 22:12 UTC (after OTA+NVS+app1 erase)
+
+**Duration:** 2 minutes (timeout)
+**Pi state:** BT restarted, BlueZ cache dir cleared
+
+### Result: FAIL — STILL "EasyPlay", connection still times out
+
+#### Device name: STILL "EasyPlay" (not "BLE-Remote")
+- The OTA+NVS+app1 erase did NOT change the advertised name
+- MAC: `38:44:BE:45:AD:86`, Service UUID: correct
+- RSSI: -84 to -88 dBm
+
+#### Connection attempts (3 found + 4 not found over 2 minutes)
+
+| Attempt | Time | Result |
+|---------|------|--------|
+| 1 | 22:12:42 | Found by UUID, RSSI -84. Timeout at 15s |
+| 2 | 22:13:02 | Scan timeout — 47 devices, not found |
+| 3 | 22:13:19 | Found by UUID, RSSI -88. Timeout at 15s |
+| (recovery) | 22:13:35 | BT restart + cache clear |
+| 4-5 | 22:13:43, 22:13:56 | Scan timeouts — 41, 43 devices |
+| 6 | 22:14:10 | Scan timeout — 54 devices |
+| (recovery) | 22:14:20 | BT restart + cache clear |
+| 7 | 22:14:30 | Found by UUID, RSSI -88. Connecting... (test ended) |
+
+#### Heartbeats: NONE
+
+#### Critical question
+**Is there a SECOND ESP32 board still powered on?** The "EasyPlay" name has persisted through:
+- Full flash erase (`esptool erase_flash`)
+- OTA partition erase
+- NVS partition erase
+- App1 partition erase
+- Multiple reflashes
+
+This is very unusual. If ALL partitions were erased on the correct board, the NVS-stored BLE name "EasyPlay" should be gone. Possibilities:
+1. **A different board** is advertising "EasyPlay" — there may be an old ESP32 still powered somewhere nearby
+2. **The erase is targeting the wrong serial port** — the C3 being flashed is not the one advertising
+3. **The C3 has a second flash chip or protected region** (very unlikely for standard C3)
+
+#### Suggestion for Mac-Claude
+- **Power off ALL ESP32 boards**, then scan from Pi — if "EasyPlay" still appears, it's a neighbor's device
+- If "EasyPlay" disappears, power on boards one at a time to find which one is "EasyPlay"
+- Check `esptool chip_id` output — does the MAC in the output match `38:44:BE:45:AD:84`?
+
+---
+
 ## Test 39 — 2026-03-17 21:44 UTC (BLE firmware confirmed running)
 
 **Duration:** 2 minutes (timeout)
