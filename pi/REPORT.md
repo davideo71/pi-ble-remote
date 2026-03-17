@@ -1,6 +1,6 @@
 # Pi Test Report: Step 2 — Button Handling
 
-## Test 31 — 2026-03-17 01:14 UTC (GPIO init only — no button reading)
+## Test 32 — 2026-03-17 01:22 UTC (button reading with debounce, serial only)
 
 **Duration:** ~120 seconds
 
@@ -11,36 +11,49 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: SUCCESS — GPIO init does NOT break BLE
+### Result: PARTIAL — Connected and received heartbeats, but connection unstable
 
 #### Connection
-- Found by UUID in **0.7 seconds** (device #4, early exit)
-- **Connected on FIRST attempt** in 13.3 seconds
-- Script start → first heartbeat: **~25 seconds** (3s service restart + 4s adapter reset + 0.7s scan + 13.3s connect + 3s subscribe)
+- Found by UUID in **4.5 seconds** (early exit, device #15)
+- **Connected on FIRST attempt** in 11.2 seconds
+- Script start → first heartbeat: **~27 seconds**
 
-#### Stability
-- **48 consecutive heartbeats** (#8-#55), every ~2 seconds, zero gaps
-- Connection held for **78+ seconds** — still alive at test timeout
-- No disconnects, no errors
+#### Heartbeats: Received but IRREGULAR
+- **18 heartbeats** (#6-#23) over 43 seconds
+- Timing was **uneven** — some gaps and bursts:
+  - Normal: #6-#15 every ~2 seconds (20 seconds, 10 heartbeats) ✓
+  - **Gap**: 5.2s between #15 and #16 (expected ~2s)
+  - **Burst**: #17, #18, #19 arrived within 0.4s of each other
+  - **Burst**: #20, #21 arrived within 0.4s
+  - Then back to normal: #22, #23 every ~2 seconds
+- This suggests the **button polling (200Hz digitalRead) is occasionally blocking the BLE stack**, causing heartbeat notifications to queue up and burst
 
-### Isolation result: GPIO init is NOT the problem
+#### Connection dropped after 48 seconds
+- DISCONNECTED at 01:23:33 — connection lasted **48 seconds**
+- This is shorter than Tests 30-31 (73-78s, still alive at timeout)
+- After disconnect, direct-connect reconnection failed ("Device not found" × 3)
 
-`pinMode(0-4, INPUT_PULLUP)` in setup() does not interfere with BLE. The issue is in one of:
-- Button reading in loop() (`digitalRead`)
-- Button event notification via BLE
-- Simulated button press code
-- The combination of button polling + BLE notification timing
+### Comparison with previous tests
 
-### Incremental test progress
+| Test | Added code | Heartbeats | Timing | Duration | Result |
+|------|-----------|------------|--------|----------|--------|
+| 30 | Heartbeat only | 37, steady | Even ~2s | 73s+ (alive) | PASS |
+| 31 | + GPIO init | 48, steady | Even ~2s | 78s+ (alive) | PASS |
+| **32** | **+ button read (serial)** | **18, irregular** | **Gaps + bursts** | **48s (dropped)** | **PARTIAL** |
 
-| Test | Firmware | GPIO init | Button read | BLE notify | Simulated | Result |
-|------|----------|-----------|-------------|------------|-----------|--------|
-| 30 | Heartbeat only | No | No | No | No | **PASS** |
-| **31** | **+ GPIO init** | **Yes** | **No** | **No** | **No** | **PASS** |
-| Next | + Button read | Yes | Yes | No | No | ? |
+### Analysis
 
-### Next step
-Add `digitalRead()` button polling in loop() with serial output only (no BLE notifications). This will test whether the polling itself interferes with BLE.
+The button polling at 200Hz (5ms loop delay) is **interfering with BLE but not fatally**:
+- Connection succeeds (unlike Tests 24-29 which couldn't connect at all)
+- Heartbeats arrive but with timing jitter
+- Connection drops earlier than heartbeat-only firmware
+
+The 5ms loop delay means `digitalRead()` runs 200 times per second across 5 pins. This is likely starving NimBLE's internal task scheduler. The original button firmware (Tests 24-29) was worse because it also had BLE notifications + simulated presses, but even without those, the polling alone causes instability.
+
+### Suggestion
+1. **Reduce polling rate** — try 50ms (20Hz) or 100ms (10Hz) loop delay instead of 5ms
+2. **Use interrupts instead of polling** — attach ISR to each GPIO pin for press/release, only process events when they occur
+3. **Add `delay(1)` or `yield()` calls** to give NimBLE processing time between digitalRead calls
 
 ---
 
@@ -48,8 +61,8 @@ Add `digitalRead()` button polling in loop() with serial output only (no BLE not
 
 | Test | Result |
 |------|--------|
-| 31 (01:14) | **PASS** — GPIO init OK, 48 heartbeats, 78s stable |
+| 32 (01:22) | **PARTIAL** — connected, heartbeats irregular, dropped after 48s |
+| 31 (01:14) | PASS — GPIO init OK, 48 heartbeats, 78s stable |
 | 30 (01:06) | PASS — heartbeat only, 37 heartbeats, 73s stable |
-| 29-24 | FAILED — button firmware breaks all connections |
+| 29-24 | FAILED — full button firmware breaks all connections |
 | 23-21 | Success — heartbeat-only firmware |
-| 18 | Best result (9s to heartbeat) |
