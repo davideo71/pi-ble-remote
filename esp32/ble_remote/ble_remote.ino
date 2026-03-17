@@ -1,7 +1,7 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server (with external antenna)
  *
- * Test 42: deinit(true) + clean build to kill EasyPlay ghost
+ * Test 43: Clean init + name in advertising data
  * LED patterns:
  *   - Slow blink (1s on/1s off): Advertising, waiting for connection
  *   - Solid ON: Connected
@@ -99,7 +99,7 @@ void setup() {
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 + Antenna");
-    Serial.println("  Test 42: deinit(true) + clean build");
+    Serial.println("  Test 43: Clean init + adv name");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Chip: %s Rev %d | Cores: %d | CPU: %dMHz\n",
@@ -108,13 +108,10 @@ void setup() {
     printTimestamp();
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
 
-    // Initialize NimBLE — deinit(true) first to clear any cached name in NVS
+    // Initialize NimBLE
     printTimestamp();
-    Serial.println("Initializing NimBLE (with NVS clear)...");
-    NimBLEDevice::init("");           // Init with empty name first
-    NimBLEDevice::deinit(true);       // Deinit and erase NimBLE NVS data
-    delay(500);
-    NimBLEDevice::init("BLE-Remote"); // Re-init with correct name
+    Serial.println("Initializing NimBLE...");
+    NimBLEDevice::init("BLE-Remote");
     NimBLEDevice::setPower(9);
     printTimestamp();
     Serial.printf("TX power: %d dBm | BLE address: %s\n",
