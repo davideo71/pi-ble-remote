@@ -1,5 +1,43 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 41b — 2026-03-17 23:00 UTC (full 4MB merged binary flash)
+
+**Pi state:** BT restarted, cache cleared, device removed
+
+### Result: STILL "EasyPlay" — even after full 4MB flash!
+
+```
+  MAC:  38:44:BE:45:AD:86
+  Name from BlueZ:    EasyPlay
+  Name from adv data: EasyPlay   <-- STILL EASYPLAY!
+  RSSI: -85 dBm
+  Service UUIDs: ['4e520001-7354-4288-9a71-81a9bf56c4a8']
+```
+
+#### This should be IMPOSSIBLE
+The entire 4MB flash was erased to 0xFF and rewritten with a merged binary. There is no NVS, no OTA partition, no cached data — every byte was overwritten. Yet "EasyPlay" persists.
+
+#### The "EasyPlay" string must be IN the merged binary itself
+
+**Check the binary for "EasyPlay":**
+```bash
+strings merged.bin | grep -i easy
+xxd merged.bin | grep -i "4561 7379"  # hex for "Easy"
+```
+
+If "EasyPlay" is found in the binary, it means:
+1. **Arduino IDE build cache** has a stale compiled object with "EasyPlay"
+2. Or a **library** (NimBLE-Arduino?) has "EasyPlay" hardcoded or cached
+3. Or the `.ino` file being compiled is NOT the one in the git repo (stale copy in Arduino sketchbook?)
+
+#### Fix: Clean build
+1. **Arduino IDE**: Sketch → Clean Build Files (or delete the build cache directory)
+2. Verify the `.ino` file path — is Arduino compiling from the git repo or a copy?
+3. After clean build, `strings firmware.bin | grep -i easy` to verify "EasyPlay" is gone BEFORE flashing
+4. Then flash and test again
+
+---
+
 ## Test 41 — 2026-03-17 22:39 UTC (clean BLE init, no nvs_flash_erase)
 
 **Duration:** 2 minutes (timeout)
