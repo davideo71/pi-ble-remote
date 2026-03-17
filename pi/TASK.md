@@ -5,7 +5,9 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 32b)
+## What changed this iteration (Test 32b — retry)
+ESP32 was power-cycled on March 17 and should now be advertising again. Previous attempt failed because ESP32 was offline.
+
 **Test 32 was PARTIAL** — button polling at 5ms (200Hz) starved NimBLE on the single-core C3. Heartbeats had gaps/bursts and connection dropped after 48s.
 
 Test 32b: **Same as Test 32 but with 10ms loop delay** (100Hz polling instead of 200Hz). This gives NimBLE more processing time between digitalRead calls.
