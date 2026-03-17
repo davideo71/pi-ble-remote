@@ -6,21 +6,28 @@
 - Mac-Claude polls `git pull` every 2 minutes to check for your results
 - Always commit and push REPORT.md when done, even if the test fails — Mac-Claude needs the results
 
-## NEW TEST — Test 39: BLE firmware confirmed running (triggered 2026-03-17 21:35)
+## NEW TEST — Test 39b: After OTA+NVS+app1 erase (triggered 2026-03-17 22:10)
 
 ### Context
-We confirmed the C3 IS running code (blink test worked, LED blinks). Serial output is broken after full flash erase (USB-JTAG config lost), but the app runs. Just reflashed BLE heartbeat firmware. The device should now advertise as **"BLE-Remote"** (NOT "EasyPlay").
+We found the root cause! The old "EasyPlay" firmware was in the **app1 OTA partition**, and the bootloader was loading it instead of our new code in app0. We have now:
+1. Erased the OTA data partition (forces boot from app0)
+2. Erased the NVS partition (clears cached BLE name)
+3. Erased the entire app1 partition (removes old EasyPlay firmware)
+4. Reflashed our firmware to app0
 
-BLE MAC is likely `38:44:BE:45:AD:86` (base MAC +2).
+The LED is slow-blinking (confirmed our code runs). Device should now advertise as **"BLE-Remote"**.
+
+BLE MAC: `38:44:BE:45:AD:86` (base MAC +2).
 
 ### Steps
 1. `git pull`
 2. `sudo systemctl restart bluetooth && sleep 3`
-3. Broad BLE scan — look for "BLE-Remote"
-4. If found — connect with `ble_receiver.py` (update KNOWN_MAC if needed) and run for 2 minutes
-5. If "EasyPlay" appears instead of "BLE-Remote" — try connecting to it anyway since it has our service UUID
-6. **Commit and push REPORT.md** — Mac-Claude is waiting!
+3. Clear BlueZ cache: `sudo rm -rf /var/lib/bluetooth/*/cache/`
+4. Broad BLE scan — report ALL device names found, especially anything at MAC `38:44:BE:45:AD:86`
+5. If "BLE-Remote" found — connect with `ble_receiver.py` for 2 minutes
+6. If "EasyPlay" STILL appears — just try connecting anyway and report what happens
+7. **Commit and push REPORT.md** — Mac-Claude is waiting!
 
 ### Success criteria
-- Device name changed from "EasyPlay" to "BLE-Remote"
+- Device name is now "BLE-Remote" (not "EasyPlay")
 - Connected and received 30+ heartbeats
