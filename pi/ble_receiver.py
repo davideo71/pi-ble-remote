@@ -311,8 +311,10 @@ async def main():
         log(f"Service restart failed (continuing): {e}", "WARN")
     print("--------------------------------------------\n")
 
+    global connected_address
     reconnect_delay = RECONNECT_DELAY
     consecutive_failures = 0
+    connected_address = None
 
     while True:
         try:

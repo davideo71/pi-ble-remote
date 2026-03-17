@@ -1,5 +1,49 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 36 — 2026-03-17 11:47 UTC (fresh reboot + BT restart + improved recovery)
+
+**Duration:** ~2 minutes (timeout)
+**Uptime at start:** 2 minutes (freshly rebooted)
+**Firmware:** Same as 35b/35c — device advertises as "EasyPlay" (not "BLE-Remote")
+
+### Result: FAIL — device found but all connections time out
+
+#### Bug fix applied
+`ble_receiver.py` had an `UnboundLocalError` on `connected_address` at line 336. The variable was never initialized in `main()` and the `global` declaration was missing. Fixed by adding `global connected_address` and initializing to `None`.
+
+#### Connection attempts
+- **Attempt 1:** Found "EasyPlay" at -90 dBm after scanning 3 devices. Disconnected at 5s, timed out at 15s.
+- **Attempt 2:** Found "EasyPlay" at -86 dBm after 9 devices. Timed out at 15s.
+- **Attempt 3:** Scan timeout — 37 devices seen, target not found. Recovery triggered (BT service restart).
+- **Attempt 4:** Found "EasyPlay" at -90 dBm after 14 devices. Timed out at 15s.
+- **Attempt 5:** Found "EasyPlay" at -90 dBm after 7 devices. Timed out at 15s (test ended at timeout).
+
+#### RSSI
+- **-86 to -90 dBm** — weak but consistently found during scans
+
+#### Key observations
+1. **Pi was freshly rebooted** — clean BlueZ state, so degradation is not the issue this time
+2. **Device name is "EasyPlay"** not "BLE-Remote" — still matched via KNOWN_MAC fallback
+3. **UUIDs=[]** — device not advertising the expected service UUID
+4. **Scanning works, connecting doesn't** — same pattern as Test 35c
+5. RSSI is comparable to Test 35 (-89 dBm, which connected) but connection never establishes
+
+#### RSSI comparison
+| Test | Pi State | RSSI | Result |
+|------|----------|------|--------|
+| Test 35 (close) | Fresh reboot | -89 dBm | PASS — first attempt, 89 heartbeats |
+| Test 35b (far) | Same session | not seen | FAIL — out of range |
+| Test 35c (far, no WiFi) | Same session | -88 to -91 dBm | FAIL — found but can't connect |
+| **Test 36** | **Fresh reboot** | **-86 to -90 dBm** | **FAIL — found but can't connect** |
+
+#### Conclusion
+The ESP32 is visible in scans (-86 to -90 dBm) but connection never establishes. Since the Pi was freshly rebooted, BlueZ state degradation is ruled out. The issue is likely:
+1. **ESP32 firmware changed** — now advertising as "EasyPlay" with no matching service UUID, which means GATT service discovery will fail even if the L2CAP connection succeeds
+2. **Signal is marginal** — -90 dBm is borderline for reliable GATT connections
+3. The ESP32 may need to be **re-flashed with the correct firmware** (BLE-Remote with the expected service UUID)
+
+---
+
 ## Test 35c — 2026-03-17 11:34 UTC (range test retry — WiFi disabled)
 
 **Duration:** ~5 minutes
