@@ -5,20 +5,24 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 34)
-**Tests 32-33 proved that `digitalRead()` polling disrupts NimBLE** on the single-core C3, regardless of loop delay or serial output. The continuous GPIO register access starves NimBLE's timing-critical radio operations.
+## What changed this iteration (Test 34b — closer range)
+ESP32 has been moved closer to the Pi. Same firmware as Test 34 (interrupt-driven buttons, no polling). No code changes.
 
-Test 34: **Interrupt-driven buttons.** Instead of polling `digitalRead()` every loop iteration, we use `attachInterrupt(pin, handler, CHANGE)` on each GPIO. The ISR just sets a flag. The loop only does a single `digitalRead()` when a flag is set (i.e., when a button actually changed). No buttons are wired, so no interrupts should fire — the loop should be as clean as Test 31.
+Test 34 failed but RSSI was -90 to -91 dBm — edge of BLE range. All failures (Tests 32-34) happened after the ESP32 was moved further away. All passes (Tests 30-31) were at -81 to -88 dBm.
+
+**This test determines whether the failures were signal-related or firmware-related.**
 
 ## Incremental progress
-| Test | Added | Loop delay | Result |
-|------|-------|-----------|--------|
-| 30 | Heartbeat only | 10ms | PASS (73s+) |
-| 31 | + GPIO init | 10ms | PASS (78s+) |
-| 32 | + digitalRead polling + serial | 5ms | PARTIAL (48s) |
-| 32b | + digitalRead polling + serial | 10ms | FAIL |
-| 33 | + digitalRead polling, no serial | 10ms | FAIL |
-| **34** | **Interrupt-driven (no polling)** | **10ms** | **?** |
+| Test | Added | RSSI | Result |
+|------|-------|------|--------|
+| 30 | Heartbeat only | -83 to -88 | PASS (73s+) |
+| 31 | + GPIO init | -84 | PASS (78s+) |
+| 32 | + digitalRead polling + serial | -81 | PARTIAL (48s) |
+| 32b | + digitalRead polling + serial | -85 | FAIL |
+| 33 | + digitalRead polling, no serial | -81 to -91 | FAIL |
+| 34 | Interrupt-driven (no polling) | -90 to -91 | FAIL |
+| **34b** | **Same as 34, closer to Pi** | **?** | **?** |
 
 ## Expected
-- Should PASS — with no buttons wired, no interrupts fire, so the loop is effectively the same as Test 31 (which passed). This confirms the architecture works before we add BLE notifications.
+- If PASS with stronger RSSI: distance was the problem all along, and we may need to re-evaluate Tests 32-33
+- If FAIL with stronger RSSI: interrupt-driven approach also has issues
