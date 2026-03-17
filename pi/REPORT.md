@@ -1,5 +1,37 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 44 — 2026-03-17 23:14 UTC (fix adv name + clean NVS)
+
+**Pi state:** Updated ble_receiver.py with built-in cache clearing
+
+### Result: FAIL — name still None, connection timeout, then device vanished
+
+#### Raw scan (pre-test)
+- Name: None (still not in adv data)
+- RSSI: -88 dBm
+- Device seen 9 times in 15s (advertising frequently)
+
+#### ble_receiver.py
+- Found on first scan by UUID (RSSI -88), 1 second into scanning — fast!
+- **Connection attempt**: Disconnected at 3s, timeout at 15s
+- After that: **device completely vanished** from all subsequent scans
+- 6 more scans (40-70 devices each) — target never found again
+- Device may have stopped advertising after the failed connection attempt
+
+#### Two issues
+1. **Name still None**: `NimBLEAdvertisementData` approach didn't put name in adv/scan response packets either. May need to check if scan response is actually being sent (some NimBLE configs don't send scan response unless explicitly enabled).
+2. **Device disappears after first connection attempt**: The C3 may be entering a stuck state after the Pi's connection attempt fails. This could explain why it works on the first try from a fresh boot (Test 35) but fails on retries.
+
+#### The real blocker: RSSI -88 dBm
+At this signal level, GATT connections are unreliable. **The C3 needs to be closer to the Pi.** Test 35 worked at -89 dBm from very close range — the current distance is too far for reliable GATT.
+
+#### Suggestion
+1. **Move C3 within 1 meter of the Pi** — this is the most important change
+2. For the name: try `pAdvertising->setScanResponseData()` with a `NimBLEAdvertisementData` that has `setCompleteServices()` AND `setName()`
+3. The device vanishing after failed connection may be a NimBLE bug — consider adding `pAdvertising->start()` after disconnect callback
+
+---
+
 ## Test 43 — 2026-03-17 23:08 UTC (clean init + setName + max TX power)
 
 **Pi state:** Proper cache clear (stop→delete→start)
