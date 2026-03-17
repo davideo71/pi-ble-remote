@@ -17,5 +17,7 @@
 4. If found, update the MAC in the report and run `python3 pi/ble_receiver.py` for 2 minutes
 5. Update `pi/REPORT.md` with results, commit and push
 
+## NEW TEST — please run this now (triggered 2026-03-17 12:30)
+
 ## Context
 Test S3-1 failed because device wasn't found. We re-flashed and confirmed the firmware uploaded successfully, but can't get serial output from the S3's native USB to verify the BLE address. The firmware should be advertising as "BLE-Remote" with service UUID `4e520001-7354-4288-9a71-81a9bf56c4a8`.
