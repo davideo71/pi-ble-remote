@@ -1,5 +1,60 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 39 — 2026-03-17 21:44 UTC (BLE firmware confirmed running)
+
+**Duration:** 2 minutes (timeout)
+**Pi state:** Bluetooth service restarted, KNOWN_MAC updated to `38:44:BE:45:AD:86`
+
+### Result: FAIL — still "EasyPlay", connection always times out
+
+#### Device name: NOT changed
+- Device still advertises as **"EasyPlay"** (not "BLE-Remote")
+- MAC: `38:44:BE:45:AD:86`
+- Service UUID: correct (`4e520001-...`)
+- RSSI: -87 to -91 dBm
+
+#### Connection attempts (6 over 2 minutes)
+
+| Attempt | Time | Found by | RSSI | Result |
+|---------|------|----------|------|--------|
+| 1 | 21:45:03 | UUID | -87 | Disconnected at 1s, timeout at 15s |
+| 2 | 21:45:25 | UUID | -87 | Disconnected at 6s, timeout at 15s |
+| 3 | 21:45:48 | MAC | -91 | Disconnected at 5s, timeout at 15s |
+| (recovery) | 21:46:04 | — | — | BT restart + cache clear |
+| 4 | 21:46:13 | MAC | -87 | Disconnected at 8s, timeout at 15s |
+| 5 | 21:46:34 | — | — | Scan timeout, not found (44 devices) |
+| 6 | 21:46:47 | — | — | Scan timeout, not found (41 devices) |
+
+#### Heartbeats: NONE
+
+#### Key observations
+1. **Name still "EasyPlay"** — the flash erase + reflash did NOT change the device name
+2. **Connection pattern**: BlueZ reports DISCONNECTED 1-8 seconds into the connection attempt, then times out waiting for GATT services. This is consistent across all tests since Test 36.
+3. **RSSI -87 to -91 dBm** — weaker than Test 38c (-83 dBm). Signal marginal.
+4. **Same failure as Tests 36b, 37, 38b, 38c** — the C3 can be discovered but never completes GATT connection
+
+#### Comparison: What worked vs what doesn't
+
+| Test | Device name | RSSI | Connection |
+|------|------------|------|------------|
+| **35 (worked!)** | **BLE-Remote** | **-89** | **PASS — 1st attempt, 89 heartbeats** |
+| 36b | EasyPlay | -83 | FAIL — all timeouts |
+| 37 | EasyPlay | -83 | FAIL — scan only |
+| 38c | EasyPlay | -83 | FAIL — scan only |
+| **39** | **EasyPlay** | **-87 to -91** | **FAIL — all timeouts** |
+
+**Test 35 was the ONLY test that worked, and it used firmware advertising as "BLE-Remote".** Every test with "EasyPlay" firmware has failed to connect.
+
+#### Conclusion
+The firmware on the C3 has NOT been successfully updated — it's still running the old "EasyPlay" firmware. This old firmware can advertise but cannot complete GATT connections from this distance. The flash erase + reflash either:
+1. Targeted the wrong board/port
+2. Didn't actually complete successfully
+3. There's a different ESP32 still running "EasyPlay"
+
+**The working Test 35 firmware ("BLE-Remote") needs to be successfully flashed to this C3.**
+
+---
+
 ## Test 38c — 2026-03-17 21:38 UTC (quick scan after erase+reflash)
 
 **Duration:** 1 broad scan × 15 seconds
