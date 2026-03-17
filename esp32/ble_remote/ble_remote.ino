@@ -1,7 +1,7 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server (with external antenna)
  *
- * Test 43: Clean init + name in advertising data
+ * Test 44: Fix adv name + full NVS erase via esptool
  * LED patterns:
  *   - Slow blink (1s on/1s off): Advertising, waiting for connection
  *   - Solid ON: Connected
@@ -99,7 +99,7 @@ void setup() {
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 + Antenna");
-    Serial.println("  Test 43: Clean init + adv name");
+    Serial.println("  Test 44: Fix adv name + clean NVS");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Chip: %s Rev %d | Cores: %d | CPU: %dMHz\n",
@@ -131,11 +131,21 @@ void setup() {
     pButtonChar->setCallbacks(new ButtonCharCallbacks());
     pService->start();
 
-    // Configure and start advertising
+    // Configure advertising with name in both adv data and scan response
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID);
-    pAdvertising->setName("BLE-Remote");  // Explicitly set name in advertising data
-    pAdvertising->enableScanResponse(true);
+
+    // Set advertising data: flags + service UUID
+    NimBLEAdvertisementData advData;
+    advData.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
+    advData.setCompleteServices16({});
+    advData.addServiceUUID(SERVICE_UUID);
+    pAdvertising->setAdvertisementData(advData);
+
+    // Set scan response: device name (so scanners see "BLE-Remote")
+    NimBLEAdvertisementData scanData;
+    scanData.setName("BLE-Remote");
+    pAdvertising->setScanResponseData(scanData);
+
     pAdvertising->setMinInterval(0x20);
     pAdvertising->setMaxInterval(0x60);
     pAdvertising->start();
