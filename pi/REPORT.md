@@ -1,5 +1,30 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 35b — 2026-03-17 11:17 UTC (range test — ESP32 moved further away)
+
+**Duration:** ~4 minutes (15 scan attempts)
+**Firmware:** Same as Test 35 (interrupt-driven buttons)
+**Pi state:** Same session as Test 35 (uptime ~18 min)
+
+### Result: FAIL — device never found
+
+#### Details
+- **15 scan attempts** over ~4 minutes, BLE-Remote never appeared in any scan
+- Other BLE devices visible (S41 152A LE at -78 to -91 dBm, various unknowns at -78 to -90 dBm)
+- ESP32 address 38:44:BE:45:AD:86 never seen — not even weak signal
+- Recovery cache clears triggered 3 times, no help
+
+#### RSSI comparison
+| Test | RSSI | Result |
+|------|------|--------|
+| Test 35 (worked) | -89 dBm | PASS — first attempt |
+| Test 35b (failed) | not seen | FAIL — completely out of range |
+
+#### Conclusion
+The ESP32 is too far away at its new position. At -89 dBm (Test 35) we were already near the limit. The new location is beyond BLE range. **Move the ESP32 closer** — it needs to be within ~5-8 meters with line of sight for reliable operation.
+
+---
+
 ## Test 35 — 2026-03-17 11:01 UTC (fresh reboot + interrupt-driven button firmware)
 
 **Duration:** ~3 minutes
