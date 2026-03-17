@@ -1,64 +1,58 @@
-# Session Notes — March 17, 2026
+# Session Notes — March 17, 2026 (Session 2)
 
-## Quick Summary for Tomorrow's Claude
+## Quick Summary for Next Session
 
-You're building a BLE remote (ESP32-C3 → Raspberry Pi). Tonight we isolated why button firmware broke BLE connections. **The root cause is the single-core ESP32-C3 being starved by tight polling loops.** Next step: re-test with 10ms loop delay, then add BLE button notifications.
+Switched from ESP32-C3 to ESP32-S3 SuperMini (dual-core). The S3 flashes successfully but **we can't verify it's running** — no serial output from native USB CDC, and Pi can't find it in BLE scans. Currently flashed with a blink test sketch to check if the board runs code at all.
 
 ---
 
-## What Was Proven (Tests 30-32)
+## What Was Proven Today
 
-We did incremental isolation starting from a known-working heartbeat-only firmware:
+### C3 single-core starvation was real BUT Pi BlueZ degradation was the bigger problem
+- Tests 32-34c all failed, we blamed digitalRead/interrupts/serial
+- **Test 31b proved the baseline had degraded** — same firmware that passed at 01:14 took 8 attempts at 10:53
+- **Test 35 (after Pi reboot)** passed perfectly — 89 heartbeats, first attempt, interrupt-driven buttons
+- Test 35b (range test) failed — ESP32 was out of BLE range at new position
 
-| Test | What was added to firmware | Loop delay | BLE Result |
-|------|--------------------------|-----------|------------|
-| 30 | Heartbeat only (no GPIO) | 10ms | **PASS** — 37 heartbeats, 73s+ stable |
-| 31 | + `pinMode(0-4, INPUT_PULLUP)` in setup | 10ms | **PASS** — 48 heartbeats, 78s+ stable |
-| 32 | + `digitalRead` polling + debounce (serial log only, no BLE notify) | **5ms** | **PARTIAL** — connected but irregular heartbeats (gaps+bursts), dropped at 48s |
-| 32b | Same as 32 but 10ms delay | 10ms | **UNTESTED** — ESP32 went offline (needs power cycle) |
+### Key lesson: Pi BlueZ degrades after many test cycles
+- `systemctl restart bluetooth` may help
+- Full Pi reboot is the guaranteed fix
+- `ble_receiver.py` now auto-restarts bluetooth after 3 consecutive failures
 
-### Root Cause
-The ESP32-C3 is **single-core**. NimBLE runs as a FreeRTOS task. The Arduino `delay()` yields to FreeRTOS, giving NimBLE CPU time. At `delay(5)` (200Hz), the loop runs too fast and starves NimBLE — heartbeat notifications queue up and burst, and the connection eventually drops. The original broken firmware (Tests 24-29) was even worse: 5ms polling + BLE button notifications + simulated presses all at once.
-
-### What was NOT the problem
-- GPIO init (`pinMode`) — completely fine
-- The Pi-side code — unchanged and working
-- ESP32 hardware — confirmed working in Test 30
+### Switched to ESP32-S3 SuperMini
+- Dual-core eliminates NimBLE starvation entirely
+- Flashes OK via `arduino-cli` with FQBN `esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc`
+- **Problem: No serial output** from native USB CDC — tried multiple times
+- **Problem: Not advertising BLE** — Pi scans find nothing
+- Board may not be running code, or `LED_BUILTIN` pin may be wrong for SuperMini
 
 ---
 
 ## Current State of Hardware
 
-- **ESP32-C3**: Flashed with Test 32b firmware (button reading + 10ms delay). Currently **offline** — needs USB power cycle. It's off the protoboard (no buttons wired). Was moved further from Pi by user.
-- **Raspberry Pi**: Running Pi-Claude, polling git for TASK.md updates. `ble_receiver.py` has: scan-first on cold start, `systemctl restart bluetooth` on startup, full adapter reset between retries.
-- **Mac**: Dev machine, ESP32 connected via USB for flashing.
+- **ESP32-S3 SuperMini**: Connected via USB-C to Mac. Flashed with blink test. No confirmed activity (no serial, not found in BLE scans). Need to visually check LED.
+- **ESP32-C3**: Disconnected/off. Last known-good firmware was Test 34 (interrupt-driven buttons) — worked perfectly on fresh Pi reboot.
+- **Raspberry Pi**: Rebooted ~11:45 UTC. Pi-Claude last reported at 12:35 UTC. May need restart.
 
 ---
 
-## What To Do Tomorrow
+## What To Do Next
 
-### Step 1: Re-run Test 32b
-1. **Power cycle the ESP32** (unplug/replug USB cable)
-2. Optionally check serial monitor to confirm it's advertising
-3. Pi-Claude should auto-run the test (TASK.md is already set for Test 32b)
-4. `git pull` and check `pi/REPORT.md` for results
+### Step 1: Verify S3 board works
+1. Check if LED is blinking on the S3 SuperMini
+2. If no LED: the board may be dead, or `LED_BUILTIN` is wrong pin. Try pin 48 (common on S3 SuperMini) or check board docs
+3. If LED works but no serial: native USB CDC issue — try different USB cable or `USBMode=default` (OTG mode)
 
-### Step 2: If Test 32b PASSES (stable connection with button reading at 10ms)
-Create **Test 33**: Add BLE button notifications
-- Keep 10ms loop delay
-- Add `sendButton()` function back — sends single ASCII char as BLE notify
-- Add grace period (5s after connect before sending any notifications)
-- Add simulated button presses (ESP32 is off protoboard, no physical buttons)
-- This tests whether BLE notifications on top of button reading work at 10ms
+### Step 2: If S3 works, get BLE running
+1. Flash BLE heartbeat firmware
+2. Confirm Pi can find and connect
+3. Then add buttons — should be straightforward on dual-core
 
-### Step 3: If Test 33 PASSES
-- We have working button firmware! Remove simulated presses.
-- Put ESP32 back on protoboard, wire buttons to GPIO 0-4 → GND
-- Test with physical button presses
-
-### Step 2 (alt): If Test 32b FAILS (still unstable at 10ms)
-- Try `delay(20)` (50Hz) — still plenty fast for 50ms debounce
-- Or switch to interrupt-driven buttons (attach ISR to GPIO pins, only process events when buttons change, not every loop iteration)
+### Step 2 (alt): If S3 doesn't work, go back to C3
+The C3 interrupt-driven firmware (Test 34) works fine on a fresh Pi. We just need to:
+- Keep the ESP32 within range (RSSI > -89 dBm)
+- Reboot Pi before test sessions
+- Add BLE button notifications (Test S3-3 plan applies to C3 too)
 
 ---
 
@@ -66,33 +60,33 @@ Create **Test 33**: Add BLE button notifications
 
 | File | Description |
 |------|-------------|
-| `esp32/ble_remote/ble_remote.ino` | ESP32 firmware — currently Test 32b (button read, serial only, 10ms delay) |
-| `pi/ble_receiver.py` | Pi BLE receiver — unchanged, working well |
-| `pi/TASK.md` | Instructions for Pi-Claude — currently set for Test 32b |
-| `pi/REPORT.md` | Pi-Claude test results — last entry is Test 32b (ESP32 offline) |
+| `esp32/ble_remote/ble_remote.ino` | Currently has S3 heartbeat firmware (but /tmp/blink_test is flashed) |
+| `pi/ble_receiver.py` | Pi BLE receiver — MAC set to S3 address, has auto-recovery |
+| `pi/TASK.md` | Instructions for Pi-Claude — set for S3 broad scan |
+| `pi/REPORT.md` | Last entry: S3-1b scan found nothing |
 
 ---
 
 ## BLE Protocol Reminder
 
-- ESP32 sends single ASCII chars as BLE notifications
-- Uppercase = KEYDOWN, lowercase = KEYUP: L/l (Left), R/r (Right), U/u (Up), D/d (Down), O/o (On/Off)
+- Device name: `BLE-Remote`
+- Service UUID: `4e520001-7354-4288-9a71-81a9bf56c4a8`
+- Button Characteristic UUID: `4e520002-7354-4288-9a71-81a9bf56c4a8` (notify)
 - Heartbeat: 4-byte uint32 counter, sent every 2 seconds
-- Pi subscribes to notifications on characteristic `4e520002-...`
+- Buttons: single ASCII char — Uppercase=KEYDOWN, lowercase=KEYUP (L/l, R/r, U/u, D/d, O/o)
 
 ---
 
-## Pi-Claude Instructions
+## Arduino-CLI Commands
 
-Pi-Claude runs on the Raspberry Pi and polls `git pull` for new TASK.md files. When it finds an update:
-1. Pulls latest code
-2. Runs `python3 pi/ble_receiver.py` for the duration specified in TASK.md
-3. Writes results to `pi/REPORT.md`
-4. Commits and pushes
+```bash
+# Compile for S3
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc" esp32/ble_remote/
 
-To trigger a new test: update `pi/TASK.md`, commit, and push. Pi-Claude will pick it up.
+# Flash S3 (may need bootloader mode: hold BOOT, tap RESET, release BOOT)
+arduino-cli upload --fqbn "esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc" --port /dev/cu.usbmodem1101 esp32/ble_remote/
 
----
-
-## Git Repo
-`https://github.com/davideo71/pi-ble-remote` (public)
+# Compile for C3 (if we go back)
+arduino-cli compile --fqbn esp32:esp32:esp32c3 esp32/ble_remote/
+arduino-cli upload --fqbn esp32:esp32:esp32c3 --port /dev/cu.usbmodem1101 esp32/ble_remote/
+```
