@@ -1,6 +1,6 @@
 # Pi Test Report: Step 2 — Button Handling
 
-## Test 34b — 2026-03-17 10:28 UTC (interrupt-driven buttons, closer range)
+## Test 34c — 2026-03-17 10:43 UTC (BlueZ cache cleared + interrupt-driven buttons)
 
 **Duration:** ~120 seconds
 
@@ -11,57 +11,57 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: FAILED — Signal strength improved but connections still fail
+### Pre-test: Cache cleared
+```
+sudo systemctl stop bluetooth
+sudo rm -rf /var/lib/bluetooth/*/38:44:BE:45:AD:86
+sudo rm -rf /var/lib/bluetooth/*/cache/38:44:BE:45:AD:86
+sudo systemctl start bluetooth
+```
 
-#### RSSI improved to -88 dBm (was -90 to -91)
-- ESP32 found by UUID/MAC on **5 out of 6 scans**
-- RSSI: **steady -88 dBm** — in the range where Tests 30-31 worked
+### Result: FAILED — BlueZ cache is NOT the problem
 
-#### Connections: ALL timed out
-- **Attempt 1**: Found (RSSI -88) → DISCONNECTED after 19.5s → timeout
-- **Attempt 2**: "No powered adapters"
-- **Attempt 3**: Found (RSSI -88) → DISCONNECTED after 3.9s → timeout
-- **Attempt 4**: Found (RSSI -88) → DISCONNECTED after 8.2s → timeout
-- **Attempt 5**: Found (RSSI -88) → DISCONNECTED after 15.5s → timeout
-- **Attempt 6**: Found (RSSI -88) → (test timed out)
+#### RSSI: Good (-83 to -88 dBm)
+Device found on all 6 scans, quick discovery (2-45 devices before match).
 
-### Conclusion: This IS a firmware issue, NOT signal strength
+#### Connections: ALL dropped during service discovery
+- **Attempt 1**: DISCONNECTED after 3.2s → timeout
+- **Attempt 2**: "failed to discover services, device disconnected" after 8s
+- **Attempt 3**: DISCONNECTED after 4.4s → timeout
+- **Attempt 4**: DISCONNECTED after 9.8s → timeout
+- **Attempt 5**: DISCONNECTED after 4.1s → timeout
+- **Attempt 6**: (test timed out)
 
-RSSI -88 dBm is in the same range where Tests 30 (-83 to -88) and 31 (-84) passed. The closer distance improved RSSI from -90 to -88 but connections still fail. **The interrupt-driven button firmware has a problem.**
+Same pattern as all tests since 32. Cache clearing made no difference.
 
-### But wait — why?
+### What we've now ruled out
 
-With no buttons wired, no interrupts should fire. The only difference from Test 31 (which PASSED):
-- Test 31: `pinMode()` only in setup, nothing in loop
-- Test 34b: `pinMode()` + `attachInterrupt()` in setup, interrupt flag check in loop
+| Hypothesis | Test | Result |
+|-----------|------|--------|
+| Loop delay too fast | 32b (10ms vs 5ms) | Both fail |
+| Serial.printf blocking | 33 (no serial) | Still fails |
+| Signal strength | 34b (closer) | Still fails at -88 dBm |
+| BlueZ stale cache | **34c (cache cleared)** | **Still fails** |
+| Interrupt conflicts | 34/34b (attachInterrupt) | Also fails |
 
-The `attachInterrupt()` itself may be the issue. Possible causes:
+### What we KNOW
 
-1. **Floating GPIO pins trigger spurious interrupts.** Without buttons wired, the GPIO pins with INPUT_PULLUP are floating or picking up noise. Even with pullups, nearby RF (from the Pi's Bluetooth!) could trigger phantom interrupts on unconnected pins, which then run the ISR and process a `digitalRead()`.
+1. **Test 31 PASSED** — `pinMode()` only, no `digitalRead()`, no `attachInterrupt()`
+2. **Every test with any GPIO read activity fails** — polling or interrupt-driven
+3. The ESP32 connects briefly (DISCONNECTED fires 3-20s in) then drops
+4. RSSI and cache are not factors
 
-2. **`attachInterrupt()` on 5 pins may conflict with NimBLE's interrupt handlers.** NimBLE uses hardware interrupts for radio timing. Having 5 additional GPIO interrupt handlers may cause priority conflicts.
+### Remaining theories
+
+1. **`attachInterrupt()` on unconnected pins with INPUT_PULLUP causes phantom interrupts** from RF noise. Each phantom interrupt triggers the ISR + a `digitalRead()`, creating the same interference as polling.
+   - **Test**: flash firmware with `attachInterrupt()` but remove the ISR body (make it empty) or remove the `digitalRead()` in the flag-check code.
+
+2. **The ESP32 NimBLE connection parameters changed** between Test 31 and Test 32 firmware. Check if the connection parameter settings (supervision timeout, connection interval) are still the same as the working Test 14/22 firmware.
+
+3. **Something in the firmware binary is different** beyond just the button code. Compare the full .ino between Test 31 (PASS) and Test 34 (FAIL) line by line.
 
 ### Suggestion
-1. **Test with only 1 interrupt pin** instead of 5 — see if reducing interrupt count helps
-2. **Connect the buttons with real pullup resistors** — floating pins with just internal pullup may be bouncing from RF noise
-3. **Try `attachInterrupt()` with `FALLING` instead of `CHANGE`** — halves the interrupt frequency
-4. **Or: go back to polling but only read 1 pin at 50ms** to isolate whether quantity or method matters
-
----
-
-## Updated Isolation Summary
-
-| Test | What's in firmware | RSSI | Result |
-|------|-------------------|------|--------|
-| 30 | Heartbeat only | -83/-88 | **PASS** |
-| 31 | + `pinMode()` | -84 | **PASS** |
-| 32 | + `digitalRead()` polling (5ms) | -81 | PARTIAL (48s) |
-| 32b | + `digitalRead()` polling (10ms) | -85 | FAIL |
-| 33 | + `digitalRead()` no serial | -81/-91 | FAIL |
-| 34 | + `attachInterrupt()` (far) | -90/-91 | FAIL |
-| **34b** | **+ `attachInterrupt()` (close)** | **-88** | **FAIL** |
-
-Both polling AND interrupts break BLE. The common factor: **any GPIO read activity** (whether polled or interrupt-driven) disrupts NimBLE connections.
+Do a **minimal diff test**: take the exact Test 31 firmware and add ONLY `attachInterrupt(0, emptyISR, CHANGE)` on a single pin with an empty ISR (`void IRAM_ATTR emptyISR() {}`). No digitalRead, no debounce, no state tracking. If this fails, `attachInterrupt` itself is incompatible with NimBLE on this chip.
 
 ---
 
@@ -69,10 +69,11 @@ Both polling AND interrupts break BLE. The common factor: **any GPIO read activi
 
 | Test | Result |
 |------|--------|
-| 34b (10:28) | **FAIL** — closer range (-88 dBm), still can't connect |
-| 34 (10:20) | FAIL — too far (-90 dBm) |
-| 33 (10:06) | FAIL — no Serial, still fails |
-| 32b (09:50) | FAIL — 10ms delay doesn't help |
-| 32 (01:22) | PARTIAL — only test that partially worked |
-| 31 (01:14) | PASS — GPIO init only |
-| 30 (01:06) | PASS — heartbeat only |
+| 34c (10:43) | **FAIL** — cache cleared, still can't connect |
+| 34b (10:28) | FAIL — closer range, still fails |
+| 34 (10:20) | FAIL — interrupt-driven, far range |
+| 33 (10:06) | FAIL — no Serial |
+| 32b (09:50) | FAIL — 10ms delay |
+| 32 (01:22) | PARTIAL — 5ms, only test that partially worked |
+| 31 (01:14) | **PASS** — GPIO init only |
+| 30 (01:06) | **PASS** — heartbeat only |
