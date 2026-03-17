@@ -1,5 +1,42 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test S3-1b — 2026-03-17 12:35 UTC (broad scan to find ESP32-S3 actual MAC)
+
+**Duration:** 3 broad scans × 15 seconds each
+**Uptime at start:** ~50 minutes
+**Bluetooth:** Service restarted before scanning
+
+### Result: FAIL — "BLE-Remote" not found in any scan
+
+#### Scan results
+Ran 3 consecutive 15-second active scans. Same 5 devices appeared each time:
+
+| Address | RSSI | Name | UUIDs |
+|---------|------|------|-------|
+| 7A:CA:CD:E6:10:69 | -81 | None | — |
+| EE:E7:90:F8:20:70 | -81 to -87 | None | — |
+| 73:62:35:37:8F:66 | -84 to -88 | None | — |
+| 7C:39:D0:0F:D1:64 | -88 | None | — |
+| 73:64:F7:50:AB:46 | -90 to -91 | S41 152A LE | 0000fe07-... |
+
+- **No device named "BLE-Remote"**
+- **No device with service UUID `4e520001-...`**
+- **MAC `A0:F2:62:EC:7A:D0` not seen**
+- The old ESP32-C3 "EasyPlay" (38:44:BE:45:AD:86) also not seen
+
+#### Conclusion
+The ESP32-S3 is not advertising at all. The Pi's Bluetooth adapter is working fine (5 other devices consistently visible). Possible causes:
+1. **ESP32-S3 not powered on** or in reset loop
+2. **Firmware didn't flash correctly** — upload may have succeeded but BLE init may be failing silently
+3. **NimBLE not starting** — if there's a crash before `NimBLEDevice::init()`, no BLE advertising would occur
+
+#### Suggestion
+- Check if ESP32-S3 has power LED lit
+- Try connecting via serial to see if there's any output (even boot messages)
+- Re-flash and verify with a simple blink sketch first to confirm the board works
+
+---
+
 ## Test S3-1 — 2026-03-17 12:02 UTC (new ESP32-S3 SuperMini — heartbeat baseline)
 
 **Duration:** 2 minutes (timeout)
