@@ -1,5 +1,19 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 40b — 2026-03-17 22:40 UTC (unplug test + NVS erase kills BLE)
+
+### Key findings
+
+1. **Unplugged C3 → "EasyPlay" disappeared from scan.** Confirms the C3 IS the "EasyPlay" device.
+2. **Plugged C3 back in (with nvs_flash_erase firmware) → LED blinks but NO BLE advertising at all.** Multiple scans over 2+ minutes, device never appeared.
+3. **This proves the latest firmware IS running on the board.** The flash was working all along — the old "EasyPlay" name was from the previous firmware in the OTA partition.
+4. **`nvs_flash_erase()` is killing BLE.** NimBLE stores its configuration in NVS. Erasing NVS on every boot wipes NimBLE's required state, so BLE init fails silently (no crash, LED still blinks, but no advertising).
+
+### Fix needed
+**Remove `nvs_flash_erase()` from setup()** and reflash. The firmware is confirmed running on this board now. Without the NVS nuke, NimBLE should initialize normally and advertise as "BLE-Remote".
+
+---
+
 ## Test 40 — 2026-03-17 22:25 UTC (NVS erase in firmware)
 
 **Duration:** 2 minutes (timeout)
