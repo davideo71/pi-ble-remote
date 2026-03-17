@@ -1,5 +1,33 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test S3-1 — 2026-03-17 12:02 UTC (new ESP32-S3 SuperMini — heartbeat baseline)
+
+**Duration:** 2 minutes (timeout)
+**Uptime at start:** ~17 minutes (rebooted earlier this session)
+**Hardware:** ESP32-S3 SuperMini (new), MAC `A0:F2:62:EC:7A:D0`
+
+### Result: FAIL — device never found in scans
+
+#### Details
+- **7 full scan cycles** over 2 minutes, ~230+ devices seen
+- MAC `A0:F2:62:EC:7A:D0` and name "BLE-Remote" never appeared in any scan
+- Other BLE devices visible: "S41 152A LE" (-82 to -91 dBm), various unknowns (-77 to -90 dBm)
+- Recovery triggered twice (bluetooth service restart after 3 consecutive failures) — no help
+- Old ESP32-C3 "EasyPlay" (38:44:BE:45:AD:86) also not seen — may be powered off
+
+#### Possible causes
+1. **ESP32-S3 not powered on or not advertising** — most likely
+2. **Out of BLE range** — but other devices are visible, so the Pi's adapter is working
+3. **Firmware issue** — device may not have been flashed successfully
+4. **Wrong MAC** — the actual MAC may differ from what was expected
+
+#### Recommendation
+- Verify the ESP32-S3 is powered on and LED is blinking (if firmware has an indicator)
+- Check Serial Monitor on the Mac to confirm the ESP32-S3 is advertising
+- Move ESP32-S3 closer to the Pi if range is uncertain
+
+---
+
 ## Test 36 — 2026-03-17 11:47 UTC (fresh reboot + BT restart + improved recovery)
 
 **Duration:** ~2 minutes (timeout)
@@ -37,10 +65,10 @@
 | **Test 36** | **Fresh reboot** | **-86 to -90 dBm** | **FAIL — found but can't connect** |
 
 #### Conclusion
-The ESP32 is visible in scans (-86 to -90 dBm) but connection never establishes. Since the Pi was freshly rebooted, BlueZ state degradation is ruled out. The issue is likely:
-1. **ESP32 firmware changed** — now advertising as "EasyPlay" with no matching service UUID, which means GATT service discovery will fail even if the L2CAP connection succeeds
-2. **Signal is marginal** — -90 dBm is borderline for reliable GATT connections
-3. The ESP32 may need to be **re-flashed with the correct firmware** (BLE-Remote with the expected service UUID)
+The ESP32 ("EasyPlay" is the correct device name) is visible in scans (-86 to -90 dBm) but connection never establishes. Since the Pi was freshly rebooted, BlueZ state degradation is ruled out. The issue is likely:
+1. **Signal is marginal** — -86 to -90 dBm is borderline for reliable GATT connections. Test 35 connected at -89 dBm but was very close to the limit.
+2. **No service UUID advertised** — UUIDs=[] on scans, so receiver falls back to MAC match only. The `ble_receiver.py` name check for "BLE-Remote" also won't match — needs updating to "EasyPlay" or just relying on MAC.
+3. **ESP32 may need to be moved closer** for reliable connections.
 
 ---
 
