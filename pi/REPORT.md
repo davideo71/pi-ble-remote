@@ -1,5 +1,46 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 44b — 2026-03-17 23:26 UTC (C3 at 10cm, name fixed)
+
+### NAME FIXED: "BLE-Remote" now appears in advertisement data!
+
+Raw scan confirmed:
+```
+  Name from BlueZ:    BLE-Remote
+  Name from adv data: BLE-Remote   <-- WORKING!
+```
+The `NimBLEAdvertisementData` scan response approach works.
+
+### Connection: STILL FAILS — 4 attempts, all timeout
+
+| Attempt | RSSI | Disconnect at | Result |
+|---------|------|---------------|--------|
+| 1 | -87 | 8s | Timeout |
+| 2 | -84 | 9s | Timeout |
+| 3 | -84 | 9s | Timeout |
+| 4 | -84 | — | Timeout (no disconnect) |
+
+### CRITICAL: RSSI -83 to -87 dBm at 10cm distance!
+
+**This is impossibly weak.** At 10cm you should see -30 to -50 dBm. Getting -83 to -87 at 10cm means:
+1. **The Pi's USB BLE dongle (CSR8510) has very poor sensitivity** — it's a cheap dongle
+2. **Or the C3's external antenna isn't actually connected/working** — check the antenna connector (u.FL/IPEX)
+3. **Or the C3 is using the PCB antenna, not the external one** — some C3 boards need a 0Ω resistor moved to switch antenna paths
+
+At these RSSI levels (-83 to -87), we're right at the noise floor and GATT connections are unreliable regardless of distance. The connection pattern (disconnect 5-9s in, then timeout) is consistent with signal too weak for the multi-packet GATT service discovery.
+
+### The connection issue is an RF/hardware problem, not firmware
+
+Test 35 worked at -89 dBm but that was the onboard BT, not the USB dongle. Actually — wait, is the Pi using its **onboard Bluetooth** or the **USB dongle**? They may have different sensitivities.
+
+### Suggestion for Mac-Claude
+1. **Check which BLE adapter the Pi is using**: `hciconfig -a` — is it hci0 (onboard) or hci1 (USB)?
+2. **Check the C3 antenna**: is the external antenna actually connected? Is the board configured for external antenna?
+3. **Try the Pi's onboard Bluetooth** instead of the USB dongle: `sudo hciconfig hci0 up` (if it's currently using hci1)
+4. At 10cm with proper hardware, RSSI should be -30 to -50 dBm. Something is fundamentally wrong with the RF path.
+
+---
+
 ## Test 44 — 2026-03-17 23:14 UTC (fix adv name + clean NVS)
 
 **Pi state:** Updated ble_receiver.py with built-in cache clearing
