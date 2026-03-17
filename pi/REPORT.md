@@ -1,6 +1,6 @@
 # Pi Test Report: Step 2 — Button Handling
 
-## Test 34c — 2026-03-17 10:43 UTC (BlueZ cache cleared + interrupt-driven buttons)
+## Test 31b — 2026-03-17 10:53 UTC (baseline recheck — exact Test 31 firmware)
 
 **Duration:** ~120 seconds
 
@@ -11,57 +11,50 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Pre-test: Cache cleared
-```
-sudo systemctl stop bluetooth
-sudo rm -rf /var/lib/bluetooth/*/38:44:BE:45:AD:86
-sudo rm -rf /var/lib/bluetooth/*/cache/38:44:BE:45:AD:86
-sudo systemctl start bluetooth
-```
+### Result: EVENTUALLY CONNECTED — but took 8 attempts (was 1 in original Test 31)
 
-### Result: FAILED — BlueZ cache is NOT the problem
+#### Connection attempts
+- **Attempts 1-7**: ALL failed with "failed to discover services, device disconnected" (2-6s each)
+- **Attempt 8** (10:55:01): **CONNECTED** after 9s → heartbeats flowing
 
-#### RSSI: Good (-83 to -88 dBm)
-Device found on all 6 scans, quick discovery (2-45 devices before match).
+#### Once connected: Stable
+- **5 heartbeats** (#6-#10) in the final ~8 seconds before test timeout
+- Connection stable, heartbeats every ~2 seconds
+- Would likely have held longer if test continued
 
-#### Connections: ALL dropped during service discovery
-- **Attempt 1**: DISCONNECTED after 3.2s → timeout
-- **Attempt 2**: "failed to discover services, device disconnected" after 8s
-- **Attempt 3**: DISCONNECTED after 4.4s → timeout
-- **Attempt 4**: DISCONNECTED after 9.8s → timeout
-- **Attempt 5**: DISCONNECTED after 4.1s → timeout
-- **Attempt 6**: (test timed out)
+#### RSSI: Variable
+- -81 to -90 dBm across scans — more variable than before
 
-Same pattern as all tests since 32. Cache clearing made no difference.
+### CRITICAL FINDING: The baseline is broken too
 
-### What we've now ruled out
+| Test | Firmware | Attempts to connect | RSSI |
+|------|----------|-------------------|------|
+| **31 (original, 01:14)** | **GPIO init only** | **1** | **-84** |
+| **31b (recheck, 10:53)** | **Same firmware** | **8** | **-81 to -90** |
 
-| Hypothesis | Test | Result |
-|-----------|------|--------|
-| Loop delay too fast | 32b (10ms vs 5ms) | Both fail |
-| Serial.printf blocking | 33 (no serial) | Still fails |
-| Signal strength | 34b (closer) | Still fails at -88 dBm |
-| BlueZ stale cache | **34c (cache cleared)** | **Still fails** |
-| Interrupt conflicts | 34/34b (attachInterrupt) | Also fails |
+The exact same firmware that connected on the first attempt at 01:14 now takes 8 attempts at 10:53. **The problem is NOT in the firmware at all.**
 
-### What we KNOW
+### What changed between Test 31 and now?
 
-1. **Test 31 PASSED** — `pinMode()` only, no `digitalRead()`, no `attachInterrupt()`
-2. **Every test with any GPIO read activity fails** — polling or interrupt-driven
-3. The ESP32 connects briefly (DISCONNECTED fires 3-20s in) then drops
-4. RSSI and cache are not factors
+1. **Pi Bluetooth adapter state** — after 20+ test cycles with repeated adapter resets, service restarts, cache removals, and failed connections, the BlueZ/adapter may be in a degraded state
+2. **ESP32 position** — was moved, now has more variable RSSI (-81 to -90 vs steady -84)
+3. **RF environment** — time of day, other BLE devices, WiFi interference may have changed
+4. **BlueZ D-Bus state** — accumulated from many failed connections and recoveries
 
-### Remaining theories
+### Re-evaluation of ALL test results since Test 32
 
-1. **`attachInterrupt()` on unconnected pins with INPUT_PULLUP causes phantom interrupts** from RF noise. Each phantom interrupt triggers the ISR + a `digitalRead()`, creating the same interference as polling.
-   - **Test**: flash firmware with `attachInterrupt()` but remove the ISR body (make it empty) or remove the `digitalRead()` in the flag-check code.
+If the baseline itself is unreliable at 8 attempts, then **Tests 32-34c failures may not have been caused by the button code at all.** They may have been caused by the same environmental/adapter degradation that makes Test 31b take 8 attempts.
 
-2. **The ESP32 NimBLE connection parameters changed** between Test 31 and Test 32 firmware. Check if the connection parameter settings (supervision timeout, connection interval) are still the same as the working Test 14/22 firmware.
-
-3. **Something in the firmware binary is different** beyond just the button code. Compare the full .ino between Test 31 (PASS) and Test 34 (FAIL) line by line.
+The only truly reliable comparison is:
+- Test 31 (01:14, fresh session): 1 attempt → connected
+- Test 32 (01:22, 8 minutes later): connected but unstable
+- Test 31b (10:53, 9.5 hours later): 8 attempts → connected
 
 ### Suggestion
-Do a **minimal diff test**: take the exact Test 31 firmware and add ONLY `attachInterrupt(0, emptyISR, CHANGE)` on a single pin with an empty ISR (`void IRAM_ATTR emptyISR() {}`). No digitalRead, no debounce, no state tracking. If this fails, `attachInterrupt` itself is incompatible with NimBLE on this chip.
+1. **Reboot the Pi** — full reboot to clear all accumulated BlueZ/kernel state
+2. **Run Test 31 firmware again** after reboot — if it connects on first attempt, the baseline is restored
+3. **Then immediately run the button firmware** — to get a fair comparison in the same session
+4. Consider that the ESP32 at its current position may be marginal — bring it closer (~50cm)
 
 ---
 
@@ -69,11 +62,12 @@ Do a **minimal diff test**: take the exact Test 31 firmware and add ONLY `attach
 
 | Test | Result |
 |------|--------|
-| 34c (10:43) | **FAIL** — cache cleared, still can't connect |
-| 34b (10:28) | FAIL — closer range, still fails |
-| 34 (10:20) | FAIL — interrupt-driven, far range |
+| 31b (10:53) | Connected on 8th attempt — baseline degraded |
+| 34c (10:43) | FAIL — cache cleared, still fails |
+| 34b (10:28) | FAIL — closer range |
+| 34 (10:20) | FAIL — interrupt-driven |
 | 33 (10:06) | FAIL — no Serial |
 | 32b (09:50) | FAIL — 10ms delay |
-| 32 (01:22) | PARTIAL — 5ms, only test that partially worked |
-| 31 (01:14) | **PASS** — GPIO init only |
-| 30 (01:06) | **PASS** — heartbeat only |
+| 32 (01:22) | PARTIAL — only partially worked |
+| 31 (01:14) | **PASS** — first attempt (fresh session) |
+| 30 (01:06) | **PASS** — first attempt (fresh session) |
