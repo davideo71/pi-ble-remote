@@ -1,5 +1,37 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 40c — 2026-03-17 22:50 UTC (raw advertisement scan)
+
+**Pi state:** BT restarted, cache cleared, device removed from bluetoothctl
+
+### Result: "EasyPlay" is in the RAW advertisement — NOT a BlueZ cache issue
+
+```
+  MAC:  38:44:BE:45:AD:86
+  Name from BlueZ:    EasyPlay
+  Name from adv data: EasyPlay     <-- SAME! Not cached.
+  RSSI: -88 dBm
+  Service UUIDs: ['4e520001-7354-4288-9a71-81a9bf56c4a8']
+  Manufacturer data: {}
+  Service data: {}
+  TX power: None
+```
+
+#### Analysis
+- **BlueZ name and advertisement name are identical**: "EasyPlay"
+- This is NOT a BlueZ caching problem — the device genuinely advertises "EasyPlay" in its BLE packets
+- The firmware on the C3 is using "EasyPlay" as the device name in `NimBLEDevice::init()` or equivalent
+
+#### Wait — but earlier the NVS erase firmware showed NO advertising?
+When we tested with the `nvs_flash_erase()` firmware, the C3 had no BLE advertising at all (LED blinked but BLE was dead). Now it's back to advertising as "EasyPlay". This means either:
+1. **Mac-Claude reflashed** without `nvs_flash_erase()` (removing the BLE-killing code), but the name is still "EasyPlay" in the firmware source
+2. Or the board was power-cycled and NVS recovered
+
+#### Conclusion
+**The firmware source code has "EasyPlay" as the device name.** Check the `.ino` file — look for the string passed to `NimBLEDevice::init()` or the advertising name setter. It needs to be changed to "BLE-Remote".
+
+---
+
 ## Test 40b — 2026-03-17 22:40 UTC (unplug test + NVS erase kills BLE)
 
 ### Key findings
