@@ -1,5 +1,41 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 43 — 2026-03-17 23:08 UTC (clean init + setName + max TX power)
+
+**Pi state:** Proper cache clear (stop→delete→start)
+
+### Result: Name still None in adv data. Connection still fails.
+
+#### Raw scan
+```
+  Name from BlueZ:    None
+  Name from adv data: None       <-- setName() not working
+  RSSI: -83 to -87 dBm
+  Service UUIDs: ['4e520001-...']
+```
+`pAdvertising->setName("BLE-Remote")` is not putting the name into adv packets. The name may need to be set differently — perhaps via `NimBLEAdvertisementData` object rather than on the advertising object directly.
+
+#### Connection: 3 attempts, all timeout. 0 heartbeats.
+- Attempt 1: Disconnected at 6s, timeout at 15s
+- Attempt 2: Timeout at 15s
+- Attempt 3: Timeout (test ended)
+
+#### RSSI: -83 to -87 dBm
+Slightly improved from Test 42 (-87 to -91). The +9 dBm TX power may be helping, but connection still fails.
+
+#### The connection problem is the main blocker now
+The name is cosmetic — we can find the device by UUID. But the GATT connection NEVER completes. This has been failing since Test 36. The only test that ever worked was Test 35 at -89 dBm from close range.
+
+Possible causes:
+1. **Distance/RSSI** — discovery works at -87 dBm but GATT needs stronger signal for the multi-packet handshake. Need -80 or better.
+2. **Firmware issue** — the deinit(true) from Test 42 may have corrupted NimBLE state in NVS, and the clean init in Test 43 inherited bad state
+3. **NimBLE connection parameters** — the C3 may need explicit connection parameter settings
+
+#### Suggestion
+**Move the C3 next to the Pi** (within 1 meter) and test. If it connects at close range, it's a signal issue. If it still fails at close range, it's a firmware/NimBLE issue.
+
+---
+
 ## Test 42 — 2026-03-17 23:00 UTC (deinit(true) + clean build + CACHE MYSTERY SOLVED)
 
 ### BREAKTHROUGH: "EasyPlay" was BlueZ cache ALL ALONG
