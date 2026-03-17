@@ -1,9 +1,9 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server
  *
- * Test 32: Heartbeat + GPIO init + button reading (serial only).
- * Polls digitalRead() with debounce, logs to Serial.
- * Does NOT send button events over BLE — heartbeat only.
+ * Test 32b: Heartbeat + button reading (serial only), 10ms loop delay.
+ * Same as Test 32 but with delay(10) instead of delay(5).
+ * Test 32 showed 5ms polling starves NimBLE on single-core C3.
  */
 
 #include <NimBLEDevice.h>
@@ -117,7 +117,7 @@ void setup() {
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 GATT Server");
-    Serial.println("  Test 32: Button read (serial only, no BLE)");
+    Serial.println("  Test 32b: Button read, 10ms loop delay");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Boot reason: %d\n", esp_reset_reason());
@@ -240,5 +240,5 @@ void loop() {
             heartbeatCounter);
     }
 
-    delay(5);  // 5ms loop for 200Hz button polling
+    delay(10);  // 10ms loop (100Hz) — 5ms was starving NimBLE on single-core C3
 }

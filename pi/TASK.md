@@ -5,21 +5,21 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 32)
-**Test 31 PASSED — GPIO init alone does NOT break BLE (48 heartbeats, 78s stable).**
+## What changed this iteration (Test 32b)
+**Test 32 was PARTIAL** — button polling at 5ms (200Hz) starved NimBLE on the single-core C3. Heartbeats had gaps/bursts and connection dropped after 48s.
 
-Test 32 adds **button reading with debounce** in loop() — `digitalRead()` on GPIO 0-4 every 5ms with 50ms debounce. Button events are logged to Serial only. **NO BLE notifications for buttons** — only heartbeats go over BLE.
+Test 32b: **Same as Test 32 but with 10ms loop delay** (100Hz polling instead of 200Hz). This gives NimBLE more processing time between digitalRead calls.
 
-This tests whether the digitalRead polling + debounce logic in the main loop interferes with BLE.
+Note: User also moved the ESP32 further from the Pi between tests. RSSI may be different.
 
-## Incremental progress so far
-| Test | Added | Result |
-|------|-------|--------|
-| 30 | Heartbeat only | PASS |
-| 31 | + GPIO init | PASS |
-| **32** | **+ button reading (serial only)** | **?** |
+## Incremental progress
+| Test | Added | Loop delay | Result |
+|------|-------|-----------|--------|
+| 30 | Heartbeat only | 10ms | PASS (73s+) |
+| 31 | + GPIO init | 10ms | PASS (78s+) |
+| 32 | + button read (serial) | **5ms** | PARTIAL (48s, irregular heartbeats) |
+| **32b** | + button read (serial) | **10ms** | **?** |
 
 ## Expected
-- Should work like Tests 30-31 (heartbeats flowing, stable connection)
-- If it fails: digitalRead polling at 200Hz is the problem
-- If it passes: the issue is in BLE button notifications or simulated presses
+- If 10ms fixes it: 5ms was too aggressive for single-core C3 + NimBLE
+- If still unstable: digitalRead itself is the problem regardless of timing
