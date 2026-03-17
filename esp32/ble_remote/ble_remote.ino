@@ -1,8 +1,8 @@
 /*
- * BLE Remote - ESP32-S3 GATT Server
+ * BLE Remote - ESP32-C3 GATT Server (with external antenna)
  *
- * Test S3-1: Heartbeat only — confirm BLE works on the S3 SuperMini.
- * Dual-core S3 gives NimBLE its own core — no starvation issues.
+ * Test 36: Heartbeat only — C3 with antenna, fresh Pi reboot.
+ * Baseline test to confirm antenna improves reliability.
  */
 
 #include <NimBLEDevice.h>
@@ -85,12 +85,12 @@ class ButtonCharCallbacks : public NimBLECharacteristicCallbacks {
 
 void setup() {
     Serial.begin(115200);
-    delay(2000);  // Extra delay for native USB CDC to initialize
+    delay(1000);
 
     Serial.println("\n\n");
     Serial.println("============================================");
-    Serial.println("  BLE Remote - ESP32-S3 SuperMini");
-    Serial.println("  Test S3-1: Heartbeat only");
+    Serial.println("  BLE Remote - ESP32-C3 + Antenna");
+    Serial.println("  Test 36: Heartbeat only");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Chip: %s Rev %d | Cores: %d | CPU: %dMHz\n",
