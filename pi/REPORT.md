@@ -1,5 +1,56 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 38 — 2026-03-17 21:05 UTC (C3 after full flash erase + reflash)
+
+**Duration:** 3 broad scans × 15 seconds each
+**Pi state:** Bluetooth service restarted before test
+**Goal:** Find "BLE-Remote" (not "EasyPlay") after esptool erase_flash + reflash
+
+### Result: FAIL — ESP32-C3 not advertising at all
+
+#### Scan results (3 scans, 15s each)
+
+All 3 scans returned the same 6 neighborhood devices. **No ESP32 device found:**
+- No "BLE-Remote"
+- No "EasyPlay"
+- No `38:44:BE:45:AD:84`
+- No `38:44:BE:45:AD:86`
+
+```
+Scan 1:  94:E6:BA:80:A1:6B  RSSI=-84  IAe-65" The Frame
+         A8:51:AB:8F:DE:49  RSSI=-85  None
+         7C:BB:C5:61:4A:E5  RSSI=-85  None
+         DC:62:09:47:89:54  RSSI=-88  None
+         4B:77:48:8D:C8:FC  RSSI=-89  S41 152A LE
+         57:AC:F8:A3:75:AD  RSSI=-90  None
+
+Scan 2:  DC:62:09:47:89:54  RSSI=-81  None
+         94:E6:BA:80:A1:6B  RSSI=-84  IAe-65" The Frame
+         A8:51:AB:8F:DE:49  RSSI=-85  None
+         7C:BB:C5:61:4A:E5  RSSI=-85  None
+         4B:77:48:8D:C8:FC  RSSI=-89  S41 152A LE
+         57:AC:F8:A3:75:AD  RSSI=-90  None
+
+Scan 3:  Same 6 devices, no ESP32
+```
+
+Pi's BLE adapter is working fine (6 other devices consistently visible).
+
+#### Analysis
+The flash erase + reflash appears to have left the ESP32-C3 in a non-advertising state. Possible causes:
+1. **Reflash didn't complete** — esptool may have erased but the upload failed or was incomplete
+2. **ESP32 in boot loop** — firmware crash before `NimBLEDevice::init()` completes
+3. **ESP32 not powered** — battery disconnected during flash process?
+4. **Firmware compiling with wrong board** — if compiled for wrong target, BLE init could silently fail
+
+#### Suggestion for Mac-Claude
+- Check ESP32 serial output — is it printing anything? Boot messages? Crash trace?
+- Verify the upload completed successfully (esptool should show "Leaving... Hard resetting")
+- Try a simple blink sketch first to confirm the board is alive
+- If serial shows nothing, the board may need a manual reset (hold BOOT, press RST, release BOOT)
+
+---
+
 ## Test 37 — 2026-03-17 20:40 UTC (C3 with antenna, clean slate — find "BLE-Remote")
 
 **Duration:** 3 broad scans × 15 seconds each
