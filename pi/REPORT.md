@@ -1,6 +1,6 @@
 # Pi Test Report: Step 2 — Button Handling
 
-## Test 32b — 2026-03-17 09:50 UTC (button reading with 10ms loop delay — retry after power cycle)
+## Test 33 — 2026-03-17 10:06 UTC (button reading WITHOUT Serial.printf on events)
 
 **Duration:** ~120 seconds
 
@@ -11,48 +11,64 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: FAILED — 10ms loop delay does NOT fix the connection drops
+### Result: FAILED — Serial.printf is NOT the culprit
 
-#### Discovery: Working
-- ESP32 found by UUID on **3 out of 7 scans** (RSSI -85 dBm, consistent)
-- Early exit scan working correctly
+#### Discovery: Working (intermittent)
+- ESP32 found on 4 out of 7 scans (3 by MAC, 1 by UUID)
+- RSSI: -81 to -91 dBm
+- ESP32 advertising is intermittent again — missed 2 consecutive scans (49 and 47 devices each)
 
-#### Connections: ALL timed out
-- **Attempt 1**: Found in 4.4s → connect → DISCONNECTED after 19s → timeout
-- **Attempt 2**: "No powered adapters" (adapter timing)
-- **Attempt 3**: Found in 0.3s → connect → DISCONNECTED after 19.5s → timeout
-- **Attempt 4-5**: "No powered adapters"
-- **Attempt 6**: Not found in scan (39 devices)
-- **Attempt 7**: Found in 1.7s → connect → timeout (15s, no DISCONNECTED)
-- **Attempt 8**: (test timed out)
+#### Connections: ALL failed
+- **Attempt 1**: Found by UUID → DISCONNECTED after 7s → timeout
+- **Attempt 2**: Found by MAC → DISCONNECTED after 14.2s → timeout
+- **Attempt 3**: Found by MAC → DISCONNECTED after 7.2s → timeout
+- **Attempt 4**: Not found (2 scans)
+- **Attempt 5**: Found by MAC → (test timed out during connect)
 
-**Zero successful connections.** Every connection attempt either timed out or got DISCONNECTED during service discovery.
+**Zero successful connections.** Same pattern as Test 32b.
 
-### Conclusion: Loop delay is NOT the root cause
+### Isolation complete: `digitalRead()` + debounce is the problem
 
-| Loop delay | Button read | Connection result |
-|-----------|------------|-------------------|
-| 10ms | No (Test 30-31) | **PASS** — stable 73-78s |
-| 5ms | Yes (Test 32) | **PARTIAL** — connected but dropped at 48s |
-| 10ms | Yes (Test 32b) | **FAIL** — can't connect at all |
+| Test | digitalRead | Serial on events | Result |
+|------|-----------|-----------------|--------|
+| 31 | No | No | **PASS** |
+| 32 | Yes | Yes (5ms) | PARTIAL |
+| 32b | Yes | Yes (10ms) | **FAIL** |
+| **33** | **Yes** | **No** | **FAIL** |
 
-Test 32b is **worse** than Test 32 (5ms), not better. This rules out loop delay as the primary cause. The `digitalRead()` polling + debounce code itself is the problem, regardless of timing.
+Removing Serial.printf made no difference. The problem is the **`digitalRead()` polling + debounce logic itself**. Reading 5 GPIO pins every 10ms with state tracking is enough to disrupt NimBLE's connection handling on the single-core ESP32-C3.
 
-### Analysis
+### Why digitalRead breaks NimBLE on ESP32-C3
 
-The difference between Test 31 (PASS, GPIO init only) and Test 32b (FAIL, GPIO init + digitalRead):
-- Test 31: `pinMode()` in setup only, loop does nothing with GPIO
-- Test 32b: `digitalRead()` on 5 pins every 10ms + debounce state tracking + serial output
+The ESP32-C3 has a single RISC-V core. NimBLE runs as a FreeRTOS task and needs the CPU at precise moments for:
+- Connection parameter negotiation (within ms of connection)
+- GATT service discovery responses
+- Link-layer packet acknowledgments
 
-Possible causes:
-1. **`digitalRead()` may be disabling interrupts** briefly on ESP32-C3, disrupting NimBLE's timing-critical radio operations
-2. **Serial output in the button handler** (`Serial.printf` on button change) may block for too long
-3. **The debounce state struct + comparison logic** may be creating timing jitter
+`digitalRead()` on ESP32 uses the GPIO hardware registers directly but may briefly disable interrupts or hold a mutex. Doing this 5 times per loop iteration (5 pins) creates repeated micro-delays that accumulate and cause NimBLE to miss its timing windows.
 
-### Suggestion
-1. **Try removing Serial.printf from button events** — serial output can block, especially at high baud rates
-2. **Try reading only 1 GPIO pin** instead of 5 — isolate if it's the quantity of reads
-3. **Switch to interrupt-driven buttons** — `attachInterrupt()` on each pin, set a flag, process in loop. This avoids continuous polling entirely.
+### Suggestion: Switch to interrupt-driven buttons
+
+Instead of polling `digitalRead()` every loop iteration:
+1. Use `attachInterrupt(pin, handler, CHANGE)` on each GPIO pin
+2. In the ISR, just set a flag or push to a queue
+3. In `loop()`, only process the flag/queue (no GPIO access)
+4. This means GPIO reads happen only on actual button changes, not 100x/second
+
+This is the standard approach for BLE + buttons on ESP32-C3.
+
+---
+
+## Incremental Isolation Summary
+
+| Test | What's in the firmware | Result | Conclusion |
+|------|----------------------|--------|------------|
+| 30 | Heartbeat only | PASS | Baseline works |
+| 31 | + `pinMode()` | PASS | GPIO init is fine |
+| 32 | + `digitalRead()` + debounce + Serial | PARTIAL | Something in the additions breaks BLE |
+| 32b | + `digitalRead()` + debounce + Serial (10ms) | FAIL | Not a timing issue |
+| 33 | + `digitalRead()` + debounce (no Serial) | FAIL | Not Serial.printf |
+| **Next** | **Interrupt-driven buttons** | **?** | **Should avoid polling entirely** |
 
 ---
 
@@ -60,9 +76,9 @@ Possible causes:
 
 | Test | Result |
 |------|--------|
-| 32b (09:50) | **FAIL** — 10ms delay doesn't help, all connections timeout |
-| 32 (01:22) | PARTIAL — 5ms, connected but irregular, dropped at 48s |
-| 31 (01:14) | PASS — GPIO init only, 48 heartbeats, 78s stable |
-| 30 (01:06) | PASS — heartbeat only, 37 heartbeats, 73s stable |
+| 33 (10:06) | **FAIL** — removing Serial didn't help, digitalRead itself is the problem |
+| 32b (09:50) | FAIL — 10ms delay doesn't help |
+| 32 (01:22) | PARTIAL — 5ms, connected but dropped at 48s |
+| 31 (01:14) | PASS — GPIO init only |
+| 30 (01:06) | PASS — heartbeat only |
 | 29-24 | FAILED — full button firmware |
-| 23-21 | Success — heartbeat-only firmware |
