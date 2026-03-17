@@ -1,5 +1,75 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 36b — 2026-03-17 20:12 UTC (C3 with external antenna, fresh Pi reboot)
+
+**Duration:** 2 minutes (timeout)
+**Pi state:** Fresh reboot, bluetooth service restarted before test
+**Firmware:** C3 with external antenna — device advertises as "EasyPlay"
+
+### Result: FAIL — device found but all connections time out
+
+#### Discovery: PASS
+- Device found on **every scan** within 1–3 seconds
+- MAC: `38:44:BE:45:AD:86` (note: task expected `38:44:BE:45:AD:84` — off by 2)
+- Device name: **"EasyPlay"** (not "BLE-Remote")
+- Matched by UUID on first scan, by name on subsequent scans
+- RSSI: consistently **-83 dBm** (slight improvement over previous -89 dBm)
+
+#### Connection attempts
+
+| Attempt | Time | Found by | RSSI | Result |
+|---------|------|----------|------|--------|
+| 1 | 20:12:16 | UUID | -83 | Disconnected at 2s, then timeout at 15s |
+| 2 | 20:12:37 | name | -83 | Timeout at 15s |
+| 3 | 20:12:59 | name | -83 | Timeout at 15s |
+| (recovery) | 20:13:19 | — | — | BT service restarted, BlueZ cache cleared |
+| 4 | 20:13:23 | — | — | Scan: 40 devices, target NOT found |
+| 5 | 20:13:36 | — | — | Scan: 51 devices, target NOT found |
+| 6 | 20:13:51 | name | -88 | Started connecting... (test ended at 2min timeout) |
+
+#### Heartbeats: NONE
+- Never got past connection phase
+
+#### Broad scan (after test)
+```
+  94:E6:BA:80:A1:6B  RSSI= -80  name=IAe-65" The Frame
+  58:8F:8E:22:B2:1C  RSSI= -82  name=None
+  38:44:BE:45:AD:86  RSSI= -83  name=EasyPlay
+  49:F1:89:C1:25:3B  RSSI= -85  name=None
+  D9:D2:94:31:79:DA  RSSI= -85  name=None
+  A8:51:AB:8F:DE:49  RSSI= -89  name=None
+  75:14:BC:5F:0C:A1  RSSI= -89  name=S41 152A LE
+```
+Device clearly visible at -83 dBm. Discovery is NOT the problem.
+
+#### Analysis
+1. **Discovery works perfectly** — ESP32-C3 advertising found quickly every time
+2. **Connection consistently fails** — immediate disconnect or timeout on every attempt
+3. **RSSI -83 dBm** — slight improvement over previous -89 dBm, but still fails
+4. **MAC is `38:44:BE:45:AD:86`** not `38:44:BE:45:AD:84` as specified in TASK.md
+5. **Device name "EasyPlay"** not "BLE-Remote" — firmware name may not have been updated
+6. **After recovery (BT restart + cache clear)**, device temporarily disappeared from scans for 2 cycles then reappeared at weaker -88 dBm
+
+#### Comparison with previous tests
+
+| Test | Pi State | RSSI | Result |
+|------|----------|------|--------|
+| 35 (close, 11:01) | Fresh reboot | -89 dBm | **PASS** — first attempt, 89 heartbeats |
+| 35c (far, no WiFi) | Same session | -88 to -91 dBm | FAIL — found but can't connect |
+| 36 (11:47) | Fresh reboot | -86 to -90 dBm | FAIL — found but can't connect |
+| **36b (20:12)** | **Fresh reboot** | **-83 dBm** | **FAIL — found but can't connect** |
+
+#### Conclusion
+Despite fresh Pi reboot, antenna addition, and slightly improved RSSI (-83 vs -89), connection still fails. Since Test 35 connected at -89 dBm from close range, and Test 36b fails at -83 dBm, **the problem is unlikely to be signal strength alone**. Something may have changed in the firmware flashed for this test, or there's a connection-level incompatibility.
+
+#### Suggestion for Mac-Claude
+- Try `bluetoothctl connect 38:44:BE:45:AD:86` directly to isolate bleak vs BlueZ
+- Check the ESP32 serial output during connection attempts — is it seeing the connection request?
+- Consider reverting to the exact firmware from Test 35 (which worked) to confirm it's not a firmware regression
+- The device name "EasyPlay" and MAC `...AD:86` suggest this may be the same firmware as before the antenna mod
+
+---
+
 ## Test S3-1b — 2026-03-17 12:35 UTC (broad scan to find ESP32-S3 actual MAC)
 
 **Duration:** 3 broad scans × 15 seconds each
