@@ -1,5 +1,49 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 42 — 2026-03-17 23:00 UTC (deinit(true) + clean build + CACHE MYSTERY SOLVED)
+
+### BREAKTHROUGH: "EasyPlay" was BlueZ cache ALL ALONG
+
+#### The discovery
+After clearing cache with `sudo rm -rf /var/lib/bluetooth/*/cache/` and scanning, the cache **regenerated** with `Name=EasyPlay`. Found it at:
+```
+/var/lib/bluetooth/00:1A:7D:DA:71:13/cache/38:44:BE:45:AD:86
+Contents: [General]\nName=EasyPlay
+```
+
+**Fix:** Stop bluetooth FIRST, delete cache, THEN restart. When we did this:
+```
+  Name from BlueZ:    None
+  Name from adv data: None       <-- NO NAME IN ADVERTISEMENT
+  RSSI: -91 dBm
+  Service UUIDs: ['4e520001-...']
+```
+
+**The device has NO name in its advertisement data.** "EasyPlay" was always coming from BlueZ's persistent cache, which was regenerating during our scans before we deleted it.
+
+#### Connection test: STILL FAILS
+- Found by UUID (name=None), RSSI -87 to -91 dBm
+- 2 connection attempts, both timeout at 15s
+- Same pattern as before — device discoverable but GATT connection never completes
+
+#### Two separate issues identified
+1. **Name issue: SOLVED** — "EasyPlay" was BlueZ cache. Device has no adv name. `NimBLEDevice::init("BLE-Remote")` sets GAP name but doesn't put it in advertising data. Need `pAdvertising->setName("BLE-Remote")` or configure scan response to include the name.
+2. **Connection issue: UNSOLVED** — GATT connection times out every time at this RSSI (-87 to -91 dBm). Test 35 connected at -89 dBm from close range. The current distance/signal may be too marginal, OR the deinit(true)+init sequence may have broken something.
+
+#### RSSI comparison
+| Test | Name in adv | RSSI | Connection |
+|------|------------|------|------------|
+| 35 (worked!) | BLE-Remote | -89 | PASS — 1st attempt |
+| 42 (now) | None | -87 to -91 | FAIL — timeout |
+
+#### Suggestion for Mac-Claude
+1. **Add name to advertising data**: `pAdvertising->setName("BLE-Remote")` — this puts the name in the actual adv packets so BlueZ (and other scanners) can see it without connecting
+2. **Remove the deinit(true)+init dance** — just do a single `init("BLE-Remote")`. The double init may be causing issues.
+3. **Move the C3 closer to the Pi** for connection testing — get RSSI to -80 or better
+4. Connection failures may also be related to the deinit/init sequence corrupting NimBLE's state
+
+---
+
 ## Test 41b — 2026-03-17 23:00 UTC (full 4MB merged binary flash)
 
 **Pi state:** BT restarted, cache cleared, device removed
