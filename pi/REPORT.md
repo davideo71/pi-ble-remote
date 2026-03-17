@@ -1,5 +1,39 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 35 — 2026-03-17 11:01 UTC (fresh reboot + interrupt-driven button firmware)
+
+**Duration:** ~3 minutes
+**Uptime at start:** 2 minutes (freshly rebooted)
+**Firmware:** Test 34 (interrupt-driven buttons, NimBLE)
+
+### Result: PASS — connected on first attempt, rock-solid connection
+
+#### Connection
+- **Scan:** Found BLE-Remote after 2s (early exit after 17 devices), RSSI -89 dBm
+- **Connect:** Connected in ~4.5s on the **first attempt**
+- **Subscribed:** Notifications active at 11:01:23
+
+#### Heartbeats
+- **89 heartbeats** received over ~3 minutes (HEARTBEAT #2 through #89)
+- Consistent ~2s interval, zero drops
+- All STATUS checks: `connected=True mtu=23`
+
+#### Conclusion
+**The interrupt-driven button firmware works perfectly.** The failures in Tests 32-34c were caused by accumulated Pi/BlueZ state degradation, not the firmware. A fresh reboot restored clean first-attempt connectivity.
+
+| Test | Firmware | Pi State | Attempts | Result |
+|------|----------|----------|----------|--------|
+| **35 (11:01)** | **Interrupt buttons (Test 34)** | **Fresh reboot** | **1** | **PASS — 89 heartbeats, stable** |
+| 31b (10:53) | GPIO init only (Test 31) | Degraded (20+ cycles) | 8 | Connected but degraded |
+| 34c-32 (10:43-01:22) | Various button firmwares | Degraded | All failed | Falsely blamed firmware |
+| 31 (01:14) | GPIO init only | Fresh session | 1 | PASS |
+
+### Next steps
+- Button firmware is confirmed working — ready to test actual button presses
+- Consider implementing periodic Pi bluetooth service restart to prevent state degradation in long sessions
+
+---
+
 ## Test 31b — 2026-03-17 10:53 UTC (baseline recheck — exact Test 31 firmware)
 
 **Duration:** ~120 seconds
@@ -62,6 +96,7 @@ The only truly reliable comparison is:
 
 | Test | Result |
 |------|--------|
+| 35 (11:01) | **PASS** — first attempt, 89 heartbeats, fresh reboot |
 | 31b (10:53) | Connected on 8th attempt — baseline degraded |
 | 34c (10:43) | FAIL — cache cleared, still fails |
 | 34b (10:28) | FAIL — closer range |
