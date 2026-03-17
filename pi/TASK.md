@@ -18,11 +18,11 @@ The updated `ble_receiver.py` now does proper cache clearing on startup (stop→
 BLE MAC: `38:44:BE:45:AD:86` (base MAC +2).
 
 ### Steps
-1. `git pull`
+1. `git pull` (there IS a new commit — check `git log --oneline -3`)
 2. **Use the updated `ble_receiver.py`** — it now handles cache clearing automatically on startup
 3. Run `python3 pi/ble_receiver.py` for 2 minutes
 4. Also run `python3 pi/raw_scan.py` to check if name now appears
-5. **If possible, ask the user to move the C3 closer** — RSSI -83 to -87 may be too weak for GATT
+5. **C3 is now at 10cm from the Pi!** Signal should be very strong.
 6. **Commit and push REPORT.md** — Mac-Claude is waiting!
 
 ### Success criteria
