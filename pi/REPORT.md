@@ -1,6 +1,6 @@
 # Pi Test Report: Step 2 — Button Handling
 
-## Test 34 — 2026-03-17 10:20 UTC (interrupt-driven buttons, no polling)
+## Test 34b — 2026-03-17 10:28 UTC (interrupt-driven buttons, closer range)
 
 **Duration:** ~120 seconds
 
@@ -11,59 +11,68 @@
 - **bleak:** 2.1.1 (with dbus-fast 4.0.0)
 - **BlueZ:** 5.82
 
-### Result: FAILED — But may be a SIGNAL STRENGTH issue, not firmware
+### Result: FAILED — Signal strength improved but connections still fail
 
-#### Discovery: Working but device is far away
-- ESP32 found by UUID on **4 out of 5 scans**
-- RSSI: **-90 to -91 dBm** — this is MUCH weaker than all previous successful tests
-- Device appears late in scans (after 6-31 other devices)
+#### RSSI improved to -88 dBm (was -90 to -91)
+- ESP32 found by UUID/MAC on **5 out of 6 scans**
+- RSSI: **steady -88 dBm** — in the range where Tests 30-31 worked
 
 #### Connections: ALL timed out
-- **Attempt 1**: Found → timeout (15s, no DISCONNECTED)
-- **Attempt 2**: Found → DISCONNECTED after 8.8s → timeout
-- **Attempt 3**: Found → DISCONNECTED after 19.7s → timeout
-- **Attempt 4**: "No powered adapters"
-- **Attempt 5**: Found → DISCONNECTED after 19.5s → timeout
+- **Attempt 1**: Found (RSSI -88) → DISCONNECTED after 19.5s → timeout
+- **Attempt 2**: "No powered adapters"
+- **Attempt 3**: Found (RSSI -88) → DISCONNECTED after 3.9s → timeout
+- **Attempt 4**: Found (RSSI -88) → DISCONNECTED after 8.2s → timeout
+- **Attempt 5**: Found (RSSI -88) → DISCONNECTED after 15.5s → timeout
+- **Attempt 6**: Found (RSSI -88) → (test timed out)
 
-### CRITICAL OBSERVATION: RSSI has dropped significantly
+### Conclusion: This IS a firmware issue, NOT signal strength
 
-| Tests (working) | RSSI | Connection |
-|-----------------|------|------------|
-| 13-14 | -81 to -91 | Connected |
-| 18 | -91 | Connected |
-| 21-22 | -84 to -87 | Connected |
-| 30-31 | -81 to -88 | **Connected** |
+RSSI -88 dBm is in the same range where Tests 30 (-83 to -88) and 31 (-84) passed. The closer distance improved RSSI from -90 to -88 but connections still fail. **The interrupt-driven button firmware has a problem.**
 
-| Tests (failing) | RSSI | Connection |
-|-----------------|------|------------|
-| 32b | -85 | Failed |
-| 33 | -81 to -91 | Failed |
-| **34** | **-90 to -91** | **Failed** |
+### But wait — why?
 
-The user confirmed moving the ESP32 further from the Pi between tests. At -90 to -91 dBm, we're at the **edge of BLE connection range**. BLE connections need a stronger signal than advertising — you can receive advertisements at -90 dBm but may not sustain a connection.
+With no buttons wired, no interrupts should fire. The only difference from Test 31 (which PASSED):
+- Test 31: `pinMode()` only in setup, nothing in loop
+- Test 34b: `pinMode()` + `attachInterrupt()` in setup, interrupt flag check in loop
 
-### This test may NOT be valid for firmware comparison
+The `attachInterrupt()` itself may be the issue. Possible causes:
 
-With no buttons wired, no interrupts should fire, so this firmware is functionally equivalent to Test 31 (which PASSED at -84 dBm). The failure is likely due to:
-1. **Weak signal (-90 dBm)** making connections unreliable
-2. **Not the interrupt-driven button code** (no interrupts are firing)
+1. **Floating GPIO pins trigger spurious interrupts.** Without buttons wired, the GPIO pins with INPUT_PULLUP are floating or picking up noise. Even with pullups, nearby RF (from the Pi's Bluetooth!) could trigger phantom interrupts on unconnected pins, which then run the ISR and process a `digitalRead()`.
+
+2. **`attachInterrupt()` on 5 pins may conflict with NimBLE's interrupt handlers.** NimBLE uses hardware interrupts for radio timing. Having 5 additional GPIO interrupt handlers may cause priority conflicts.
 
 ### Suggestion
-1. **Move the ESP32 closer to the Pi** — back to the ~1 meter distance used in Tests 18-31
-2. **Re-run Test 34** at the closer distance
-3. If it PASSES at close range: the failures since Test 32 may have ALL been signal-related, not firmware-related!
+1. **Test with only 1 interrupt pin** instead of 5 — see if reducing interrupt count helps
+2. **Connect the buttons with real pullup resistors** — floating pins with just internal pullup may be bouncing from RF noise
+3. **Try `attachInterrupt()` with `FALLING` instead of `CHANGE`** — halves the interrupt frequency
+4. **Or: go back to polling but only read 1 pin at 50ms** to isolate whether quantity or method matters
 
-This is worth investigating because Test 32 (the first "PARTIAL" result with button polling) also coincided with the ESP32 being moved. The timing irregularities may have been signal dropouts, not CPU starvation.
+---
+
+## Updated Isolation Summary
+
+| Test | What's in firmware | RSSI | Result |
+|------|-------------------|------|--------|
+| 30 | Heartbeat only | -83/-88 | **PASS** |
+| 31 | + `pinMode()` | -84 | **PASS** |
+| 32 | + `digitalRead()` polling (5ms) | -81 | PARTIAL (48s) |
+| 32b | + `digitalRead()` polling (10ms) | -85 | FAIL |
+| 33 | + `digitalRead()` no serial | -81/-91 | FAIL |
+| 34 | + `attachInterrupt()` (far) | -90/-91 | FAIL |
+| **34b** | **+ `attachInterrupt()` (close)** | **-88** | **FAIL** |
+
+Both polling AND interrupts break BLE. The common factor: **any GPIO read activity** (whether polled or interrupt-driven) disrupts NimBLE connections.
 
 ---
 
 ## Previous Tests Summary
 
-| Test | Result | RSSI |
-|------|--------|------|
-| 34 (10:20) | **FAIL** — all timeouts, RSSI -90 to -91 (too weak?) |
-| 33 (10:06) | FAIL — RSSI -81 to -91 |
-| 32b (09:50) | FAIL — RSSI -85 |
-| 32 (01:22) | PARTIAL — RSSI -81 |
-| 31 (01:14) | PASS — RSSI -84 |
-| 30 (01:06) | PASS — RSSI -83 to -88 |
+| Test | Result |
+|------|--------|
+| 34b (10:28) | **FAIL** — closer range (-88 dBm), still can't connect |
+| 34 (10:20) | FAIL — too far (-90 dBm) |
+| 33 (10:06) | FAIL — no Serial, still fails |
+| 32b (09:50) | FAIL — 10ms delay doesn't help |
+| 32 (01:22) | PARTIAL — only test that partially worked |
+| 31 (01:14) | PASS — GPIO init only |
+| 30 (01:06) | PASS — heartbeat only |
