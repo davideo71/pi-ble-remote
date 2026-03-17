@@ -5,21 +5,14 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 30)
-**ESP32: Reverted to heartbeat-only firmware (no buttons, no GPIO).** Tests 24-29 ALL failed with the button firmware — connections drop at the BLE level before GATT discovery completes. This test strips the firmware back to match the working Tests 21-23 to confirm the ESP32 hardware is still OK.
+## What changed this iteration (Test 31)
+**Test 30 PASSED — heartbeat-only firmware works perfectly (37 heartbeats, 73s stable).**
 
-Changes from the button firmware:
-- Removed ALL button code: struct, GPIO init, button scanning, simulated presses
-- Removed grace period (not needed)
-- Heartbeat sends immediately on connect (like Tests 21-23)
-- Loop delay back to 10ms (was 5ms for button polling)
+Now adding button code back incrementally. **Test 31 adds ONLY GPIO init** — `pinMode(0-4, INPUT_PULLUP)` in setup(). No button reading in loop(), no notifications, no simulated presses. Just the pinMode calls.
+
+This tests whether initializing GPIO pins as INPUT_PULLUP interferes with BLE.
 
 ## Expected
-- Scan-based discovery finds ESP32
-- Connection succeeds on first or second attempt
-- Heartbeats arrive every 2 seconds
-- Stable connection for the full 2 minutes
-- This should work exactly like Tests 21-23
-
-## Key question
-Does removing the button code restore stable connections? If YES → the button code is the problem and we'll add it back incrementally. If NO → something else changed (Pi-side or environment).
+- Should work exactly like Test 30 (heartbeats flowing, stable connection)
+- If it fails: GPIO init itself is the problem (maybe GPIO 2 strapping pin on C3?)
+- If it passes: the issue is in the button reading/notification code, not GPIO init

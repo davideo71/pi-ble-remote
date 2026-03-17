@@ -1,9 +1,9 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server
  *
- * Test 30: Heartbeat only (no buttons, no GPIO).
- * Stripped back to isolate whether button code causes connection drops.
- * This should match the behavior that worked in Tests 21-23.
+ * Test 31: Heartbeat + GPIO init only (no button reading).
+ * Tests whether just initializing GPIO 0-4 as INPUT_PULLUP
+ * interferes with BLE connections.
  */
 
 #include <NimBLEDevice.h>
@@ -96,14 +96,24 @@ void setup() {
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 GATT Server");
-    Serial.println("  Test 30: HEARTBEAT ONLY (no buttons)");
+    Serial.println("  Test 31: Heartbeat + GPIO init only");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Boot reason: %d\n", esp_reset_reason());
     printTimestamp();
     Serial.printf("Free heap at boot: %d bytes\n", ESP.getFreeHeap());
 
-    // NO GPIO initialization — this test isolates BLE from button code
+    // Initialize button GPIOs — but do NOT read them in loop()
+    // Testing whether just the pinMode calls affect BLE
+    printTimestamp();
+    Serial.println("Initializing GPIOs (INPUT_PULLUP only, no reading)...");
+    const uint8_t buttonPins[] = {0, 1, 2, 3, 4};
+    for (int i = 0; i < 5; i++) {
+        pinMode(buttonPins[i], INPUT_PULLUP);
+        printTimestamp();
+        Serial.printf("  GPIO %d configured as INPUT_PULLUP (read: %d)\n",
+            buttonPins[i], digitalRead(buttonPins[i]));
+    }
 
     // Initialize NimBLE
     printTimestamp();
