@@ -1,5 +1,25 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 44c — 2026-03-17 23:50 UTC (rescan — C3 not advertising)
+
+### Result: C3 not found — not advertising at all
+
+Broad 20-second scan found 8 neighborhood devices. No `38:44:BE:45:AD:86`, no "BLE-Remote", no "EasyPlay".
+
+The C3 has stopped advertising. This confirms the pattern from Test 44: **the C3 stops advertising after a failed GATT connection attempt and does not recover**. It needs a power cycle (unplug/replug) to start advertising again.
+
+This is a firmware bug — the NimBLE advertising should automatically restart after a failed connection. The firmware likely needs:
+```cpp
+// In the server callbacks:
+void onDisconnect(NimBLEServer* pServer) {
+    NimBLEDevice::startAdvertising();  // Restart advertising after disconnect
+}
+```
+
+Without this, once the Pi attempts to connect and fails, the C3 goes silent permanently until rebooted.
+
+---
+
 ## Test 44b — 2026-03-17 23:26 UTC (C3 at 10cm, name fixed)
 
 ### NAME FIXED: "BLE-Remote" now appears in advertisement data!
