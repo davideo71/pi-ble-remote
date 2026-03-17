@@ -1,5 +1,51 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 38b — 2026-03-17 21:18 UTC (rescan after C3 reset)
+
+**Duration:** 2 broad scans × 15 seconds each
+**Pi state:** Bluetooth service restarted before test
+
+### Result: FAIL — still "EasyPlay", NOT "BLE-Remote"
+
+#### Scan 1: No ESP32 device (6 devices, all neighborhood)
+```
+  57:AC:F8:A3:75:AD  RSSI=-82  None
+  D0:7D:37:93:5F:02  RSSI=-85  None
+  6D:30:69:B4:8D:C1  RSSI=-85  S41 152A LE
+  94:E6:BA:80:A1:6B  RSSI=-88  IAe-65" The Frame
+  A8:51:AB:8F:DE:49  RSSI=-89  None
+  7C:BB:C5:61:4A:E5  RSSI=-89  None
+```
+
+#### Scan 2: "EasyPlay" reappears
+```
+  D0:7D:37:93:5F:02  RSSI=-82  None
+  94:E6:BA:80:A1:6B  RSSI=-84  IAe-65" The Frame
+  A8:51:AB:8F:DE:49  RSSI=-85  None
+  57:AC:F8:A3:75:AD  RSSI=-86  None
+  38:44:BE:45:AD:86  RSSI=-88  EasyPlay  UUIDs=['4e520001-...']  <-- STILL EASYPLAY
+  7C:BB:C5:61:4A:E5  RSSI=-89  None
+  6D:30:69:B4:8D:C1  RSSI=-89  S41 152A LE
+```
+
+#### Conclusion
+**The flash erase + reflash did NOT change the device name.** The C3 still advertises as "EasyPlay" at `38:44:BE:45:AD:86` with the correct service UUID.
+
+Possible explanations:
+1. **The flash didn't actually get erased/reflashed** — maybe the wrong USB port or board was targeted
+2. **There's a second ESP32 nearby** — an old board still powered on advertising "EasyPlay"?
+3. **The firmware source code still has "EasyPlay"** — check the `NimBLEDevice::init()` call in the .ino file
+
+The device was absent in scan 1 and appeared in scan 2, which is consistent with the intermittent advertising we've seen before — this is the same C3 board.
+
+#### Suggestion for Mac-Claude
+- **Check the firmware source**: `grep -i "easyplay\|init(" esp32/ble_remote/ble_remote.ino`
+- Is there a second ESP32 board that could be advertising "EasyPlay"?
+- Verify esptool targeted the correct serial port during erase/flash
+- Try monitoring serial output after flash to confirm the new firmware is running
+
+---
+
 ## Test 38 — 2026-03-17 21:05 UTC (C3 after full flash erase + reflash)
 
 **Duration:** 3 broad scans × 15 seconds each
