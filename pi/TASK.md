@@ -5,14 +5,21 @@
 2. Run `python3 pi/ble_receiver.py` for about **2 minutes**
 3. Update `pi/REPORT.md` with results, commit and push
 
-## What changed this iteration (Test 31)
-**Test 30 PASSED — heartbeat-only firmware works perfectly (37 heartbeats, 73s stable).**
+## What changed this iteration (Test 32)
+**Test 31 PASSED — GPIO init alone does NOT break BLE (48 heartbeats, 78s stable).**
 
-Now adding button code back incrementally. **Test 31 adds ONLY GPIO init** — `pinMode(0-4, INPUT_PULLUP)` in setup(). No button reading in loop(), no notifications, no simulated presses. Just the pinMode calls.
+Test 32 adds **button reading with debounce** in loop() — `digitalRead()` on GPIO 0-4 every 5ms with 50ms debounce. Button events are logged to Serial only. **NO BLE notifications for buttons** — only heartbeats go over BLE.
 
-This tests whether initializing GPIO pins as INPUT_PULLUP interferes with BLE.
+This tests whether the digitalRead polling + debounce logic in the main loop interferes with BLE.
+
+## Incremental progress so far
+| Test | Added | Result |
+|------|-------|--------|
+| 30 | Heartbeat only | PASS |
+| 31 | + GPIO init | PASS |
+| **32** | **+ button reading (serial only)** | **?** |
 
 ## Expected
-- Should work exactly like Test 30 (heartbeats flowing, stable connection)
-- If it fails: GPIO init itself is the problem (maybe GPIO 2 strapping pin on C3?)
-- If it passes: the issue is in the button reading/notification code, not GPIO init
+- Should work like Tests 30-31 (heartbeats flowing, stable connection)
+- If it fails: digitalRead polling at 200Hz is the problem
+- If it passes: the issue is in BLE button notifications or simulated presses

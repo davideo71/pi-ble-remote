@@ -1,9 +1,9 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server
  *
- * Test 31: Heartbeat + GPIO init only (no button reading).
- * Tests whether just initializing GPIO 0-4 as INPUT_PULLUP
- * interferes with BLE connections.
+ * Test 32: Heartbeat + GPIO init + button reading (serial only).
+ * Polls digitalRead() with debounce, logs to Serial.
+ * Does NOT send button events over BLE — heartbeat only.
  */
 
 #include <NimBLEDevice.h>
@@ -11,6 +11,27 @@
 // Custom UUIDs for our remote service
 #define SERVICE_UUID        "4e520001-7354-4288-9a71-81a9bf56c4a8"
 #define BUTTON_CHAR_UUID    "4e520002-7354-4288-9a71-81a9bf56c4a8"
+
+// Button configuration
+struct Button {
+    uint8_t pin;
+    char pressChar;
+    char releaseChar;
+    bool pressed;
+    bool lastReading;
+    unsigned long lastDebounceTime;
+};
+
+#define NUM_BUTTONS 5
+#define DEBOUNCE_MS 50
+
+Button buttons[NUM_BUTTONS] = {
+    {0, 'L', 'l', false, true, 0},
+    {1, 'R', 'r', false, true, 0},
+    {2, 'U', 'u', false, true, 0},
+    {3, 'D', 'd', false, true, 0},
+    {4, 'O', 'o', false, true, 0},
+};
 
 NimBLEServer* pServer = nullptr;
 NimBLECharacteristic* pButtonChar = nullptr;
@@ -96,30 +117,29 @@ void setup() {
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 GATT Server");
-    Serial.println("  Test 31: Heartbeat + GPIO init only");
+    Serial.println("  Test 32: Button read (serial only, no BLE)");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Boot reason: %d\n", esp_reset_reason());
     printTimestamp();
     Serial.printf("Free heap at boot: %d bytes\n", ESP.getFreeHeap());
 
-    // Initialize button GPIOs — but do NOT read them in loop()
-    // Testing whether just the pinMode calls affect BLE
+    // Initialize button GPIOs
     printTimestamp();
-    Serial.println("Initializing GPIOs (INPUT_PULLUP only, no reading)...");
-    const uint8_t buttonPins[] = {0, 1, 2, 3, 4};
-    for (int i = 0; i < 5; i++) {
-        pinMode(buttonPins[i], INPUT_PULLUP);
+    Serial.println("Initializing buttons (GPIO 0-4, INPUT_PULLUP)...");
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        pinMode(buttons[i].pin, INPUT_PULLUP);
         printTimestamp();
-        Serial.printf("  GPIO %d configured as INPUT_PULLUP (read: %d)\n",
-            buttonPins[i], digitalRead(buttonPins[i]));
+        Serial.printf("  GPIO %d = '%c'/'%c' (read: %d)\n",
+            buttons[i].pin, buttons[i].pressChar, buttons[i].releaseChar,
+            digitalRead(buttons[i].pin));
     }
 
     // Initialize NimBLE
     printTimestamp();
     Serial.println("Initializing NimBLE...");
     NimBLEDevice::init("BLE-Remote");
-    NimBLEDevice::setPower(9);  // +9 dBm — cheap C3 clones distort at max power
+    NimBLEDevice::setPower(9);
     printTimestamp();
     Serial.printf("TX power: %d dBm | BLE address: %s\n",
         NimBLEDevice::getPower(),
@@ -142,8 +162,8 @@ void setup() {
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->enableScanResponse(true);
-    pAdvertising->setMinInterval(0x20);  // 20ms
-    pAdvertising->setMaxInterval(0x60);  // 60ms
+    pAdvertising->setMinInterval(0x20);
+    pAdvertising->setMaxInterval(0x60);
     pAdvertising->start();
 
     printTimestamp();
@@ -156,7 +176,28 @@ void setup() {
 void loop() {
     unsigned long now = millis();
 
-    // ---- Heartbeat every 2s (no grace period needed without buttons) ----
+    // ---- Button scanning with debounce (SERIAL ONLY, no BLE notify) ----
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        bool reading = !digitalRead(buttons[i].pin);  // LOW = pressed (inverted)
+
+        if (reading != buttons[i].lastReading) {
+            buttons[i].lastDebounceTime = now;
+            buttons[i].lastReading = reading;
+        }
+
+        if ((now - buttons[i].lastDebounceTime) >= DEBOUNCE_MS) {
+            if (reading != buttons[i].pressed) {
+                buttons[i].pressed = reading;
+                // Log to serial only — do NOT send over BLE
+                printTimestamp();
+                Serial.printf("BUTTON (serial only): '%c' [GPIO %d]\n",
+                    reading ? buttons[i].pressChar : buttons[i].releaseChar,
+                    buttons[i].pin);
+            }
+        }
+    }
+
+    // ---- Heartbeat every 2s ----
     if (deviceConnected && (now - lastHeartbeat >= 2000)) {
         lastHeartbeat = now;
         heartbeatCounter++;
@@ -178,7 +219,7 @@ void loop() {
         wasConnected = true;
         heartbeatCounter = 0;
         printTimestamp();
-        Serial.println("State: DISCONNECTED -> CONNECTED (heartbeat-only mode)");
+        Serial.println("State: DISCONNECTED -> CONNECTED (button read, serial only)");
     }
 
     // Re-start advertising every 30 seconds when not connected
@@ -199,5 +240,5 @@ void loop() {
             heartbeatCounter);
     }
 
-    delay(10);  // 10ms loop (back to original, no button polling needed)
+    delay(5);  // 5ms loop for 200Hz button polling
 }
