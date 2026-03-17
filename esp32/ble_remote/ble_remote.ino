@@ -1,9 +1,10 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server
  *
- * Test 33: Heartbeat + button reading (NO serial output on button events), 10ms loop delay.
- * Test 32b failed with serial printf on button events — testing if Serial.printf
- * in the polling loop is what disrupts NimBLE on the single-core C3.
+ * Test 34: Interrupt-driven buttons — no digitalRead in loop.
+ * Tests 32-33 proved that polling digitalRead() on 5 pins disrupts NimBLE
+ * on the single-core C3. This version uses attachInterrupt() so GPIO is
+ * only accessed on actual pin changes, not every loop iteration.
  */
 
 #include <NimBLEDevice.h>
@@ -17,21 +18,31 @@ struct Button {
     uint8_t pin;
     char pressChar;
     char releaseChar;
-    bool pressed;
-    bool lastReading;
-    unsigned long lastDebounceTime;
+    volatile bool changed;      // set by ISR
+    bool pressed;               // debounced state
+    unsigned long lastChangeTime; // for debounce
 };
 
 #define NUM_BUTTONS 5
 #define DEBOUNCE_MS 50
 
 Button buttons[NUM_BUTTONS] = {
-    {0, 'L', 'l', false, true, 0},
-    {1, 'R', 'r', false, true, 0},
-    {2, 'U', 'u', false, true, 0},
-    {3, 'D', 'd', false, true, 0},
-    {4, 'O', 'o', false, true, 0},
+    {0, 'L', 'l', false, false, 0},
+    {1, 'R', 'r', false, false, 0},
+    {2, 'U', 'u', false, false, 0},
+    {3, 'D', 'd', false, false, 0},
+    {4, 'O', 'o', false, false, 0},
 };
+
+// ISR handlers — one per button, just sets the changed flag
+void IRAM_ATTR isr_btn0() { buttons[0].changed = true; }
+void IRAM_ATTR isr_btn1() { buttons[1].changed = true; }
+void IRAM_ATTR isr_btn2() { buttons[2].changed = true; }
+void IRAM_ATTR isr_btn3() { buttons[3].changed = true; }
+void IRAM_ATTR isr_btn4() { buttons[4].changed = true; }
+
+typedef void (*isr_func_t)();
+isr_func_t isrHandlers[NUM_BUTTONS] = { isr_btn0, isr_btn1, isr_btn2, isr_btn3, isr_btn4 };
 
 NimBLEServer* pServer = nullptr;
 NimBLECharacteristic* pButtonChar = nullptr;
@@ -117,22 +128,22 @@ void setup() {
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 GATT Server");
-    Serial.println("  Test 33: Button read, NO serial on events, 10ms");
+    Serial.println("  Test 34: Interrupt-driven buttons, 10ms");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Boot reason: %d\n", esp_reset_reason());
     printTimestamp();
     Serial.printf("Free heap at boot: %d bytes\n", ESP.getFreeHeap());
 
-    // Initialize button GPIOs
+    // Initialize button GPIOs with interrupts
     printTimestamp();
-    Serial.println("Initializing buttons (GPIO 0-4, INPUT_PULLUP)...");
+    Serial.println("Initializing buttons (GPIO 0-4, INPUT_PULLUP, interrupt on CHANGE)...");
     for (int i = 0; i < NUM_BUTTONS; i++) {
         pinMode(buttons[i].pin, INPUT_PULLUP);
+        attachInterrupt(buttons[i].pin, isrHandlers[i], CHANGE);
         printTimestamp();
-        Serial.printf("  GPIO %d = '%c'/'%c' (read: %d)\n",
-            buttons[i].pin, buttons[i].pressChar, buttons[i].releaseChar,
-            digitalRead(buttons[i].pin));
+        Serial.printf("  GPIO %d = '%c'/'%c' — interrupt attached\n",
+            buttons[i].pin, buttons[i].pressChar, buttons[i].releaseChar);
     }
 
     // Initialize NimBLE
@@ -176,20 +187,28 @@ void setup() {
 void loop() {
     unsigned long now = millis();
 
-    // ---- Button scanning with debounce (SERIAL ONLY, no BLE notify) ----
+    // ---- Process button interrupts (only when a pin actually changed) ----
     for (int i = 0; i < NUM_BUTTONS; i++) {
-        bool reading = !digitalRead(buttons[i].pin);  // LOW = pressed (inverted)
+        if (!buttons[i].changed) continue;
 
-        if (reading != buttons[i].lastReading) {
-            buttons[i].lastDebounceTime = now;
-            buttons[i].lastReading = reading;
+        // Debounce: ignore changes within DEBOUNCE_MS of last change
+        if ((now - buttons[i].lastChangeTime) < DEBOUNCE_MS) {
+            buttons[i].changed = false;
+            continue;
         }
 
-        if ((now - buttons[i].lastDebounceTime) >= DEBOUNCE_MS) {
-            if (reading != buttons[i].pressed) {
-                buttons[i].pressed = reading;
-                // No serial output here — testing if Serial.printf disrupts NimBLE
-            }
+        buttons[i].changed = false;
+        buttons[i].lastChangeTime = now;
+
+        // Read current state — single digitalRead only when ISR fired
+        bool pressed = !digitalRead(buttons[i].pin);  // LOW = pressed
+
+        if (pressed != buttons[i].pressed) {
+            buttons[i].pressed = pressed;
+            printTimestamp();
+            Serial.printf("BUTTON: '%c' [GPIO %d]\n",
+                pressed ? buttons[i].pressChar : buttons[i].releaseChar,
+                buttons[i].pin);
         }
     }
 
@@ -215,7 +234,7 @@ void loop() {
         wasConnected = true;
         heartbeatCounter = 0;
         printTimestamp();
-        Serial.println("State: DISCONNECTED -> CONNECTED (button read, no serial on events)");
+        Serial.println("State: DISCONNECTED -> CONNECTED (interrupt-driven buttons)");
     }
 
     // Re-start advertising every 30 seconds when not connected
@@ -236,5 +255,5 @@ void loop() {
             heartbeatCounter);
     }
 
-    delay(10);  // 10ms loop (100Hz)
+    delay(10);  // 10ms loop — but no GPIO access unless ISR fired
 }
