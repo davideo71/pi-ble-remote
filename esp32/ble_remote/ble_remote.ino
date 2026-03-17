@@ -1,8 +1,11 @@
 /*
  * BLE Remote - ESP32-C3 GATT Server (with external antenna)
  *
- * Test 36: Heartbeat only — C3 with antenna, fresh Pi reboot.
- * Baseline test to confirm antenna improves reliability.
+ * Test 39: Heartbeat + LED status indicator
+ * LED patterns:
+ *   - Slow blink (1s on/1s off): Advertising, waiting for connection
+ *   - Fast blink (100ms): Connected, sending heartbeats
+ *   - Quick triple flash: Heartbeat sent
  */
 
 #include <NimBLEDevice.h>
@@ -10,6 +13,8 @@
 // Custom UUIDs for our remote service
 #define SERVICE_UUID        "4e520001-7354-4288-9a71-81a9bf56c4a8"
 #define BUTTON_CHAR_UUID    "4e520002-7354-4288-9a71-81a9bf56c4a8"
+
+#define LED_PIN 8  // Built-in LED on C3
 
 NimBLEServer* pServer = nullptr;
 NimBLECharacteristic* pButtonChar = nullptr;
@@ -20,6 +25,8 @@ uint32_t heartbeatCounter = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastMemReport = 0;
 unsigned long lastAdvRestart = 0;
+unsigned long lastLedToggle = 0;
+bool ledState = false;
 
 // Helper: milliseconds since boot as readable timestamp
 void printTimestamp() {
@@ -84,13 +91,16 @@ class ButtonCharCallbacks : public NimBLECharacteristicCallbacks {
 };
 
 void setup() {
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH);  // LED on during boot
+
     Serial.begin(115200);
     delay(1000);
 
     Serial.println("\n\n");
     Serial.println("============================================");
     Serial.println("  BLE Remote - ESP32-C3 + Antenna");
-    Serial.println("  Test 36: Heartbeat only");
+    Serial.println("  Test 39: Heartbeat + LED status");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Chip: %s Rev %d | Cores: %d | CPU: %dMHz\n",
@@ -171,6 +181,20 @@ void loop() {
         NimBLEDevice::getAdvertising()->start();
         printTimestamp();
         Serial.println("ADV: Re-started advertising (periodic refresh)");
+    }
+
+    // LED status indicator
+    // Connected: solid ON
+    // Advertising: slow blink (1s interval)
+    if (deviceConnected) {
+        digitalWrite(LED_PIN, HIGH);  // Solid on when connected
+    } else {
+        // Slow blink when advertising
+        if (now - lastLedToggle >= 1000) {
+            lastLedToggle = now;
+            ledState = !ledState;
+            digitalWrite(LED_PIN, ledState ? HIGH : LOW);
+        }
     }
 
     // Memory report every 30 seconds
