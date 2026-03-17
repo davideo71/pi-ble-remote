@@ -1,5 +1,53 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 41 — 2026-03-17 22:39 UTC (clean BLE init, no nvs_flash_erase)
+
+**Duration:** 2 minutes (timeout)
+**Pi state:** BT restarted, cache cleared, device removed
+
+### Result: FAIL — still "EasyPlay" in raw adv, connection still times out
+
+#### Raw scan (pre-test)
+```
+  Name from BlueZ:    EasyPlay
+  Name from adv data: EasyPlay   <-- NOT BLE-Remote
+  RSSI: -87 dBm
+```
+
+#### ble_receiver.py: 2 connection attempts, both timeout. 0 heartbeats.
+- Found by UUID match twice (RSSI -83 to -87)
+- Multiple scans where device wasn't found at all (intermittent advertising)
+- Connection timeout every time
+
+#### The firmware is NOT being updated on this board
+
+The name "EasyPlay" persists in the raw advertisement data despite:
+- Full flash erase + reflash
+- OTA/NVS/app1 partition erases
+- nvs_flash_erase() in code (which killed BLE entirely)
+- Removing nvs_flash_erase() and reflashing again
+
+**The only firmware change that was visible was nvs_flash_erase() killing BLE.** Every other flash attempt has had zero effect on the BLE name — it's always "EasyPlay".
+
+#### Theory: OTA bootloader is loading app1, not app0
+
+NimBLE stores the device name in NVS. The external NVS erase + OTA data erase should have forced boot from app0. But:
+- If the bootloader is configured for factory+OTA scheme, erasing OTA data boots from **factory**, not app0
+- The factory partition might still have old "EasyPlay" firmware
+- Our code might be going into a different slot than expected
+
+#### Alternative theory: Arduino IDE is uploading to the wrong partition
+
+The Arduino IDE might be uploading to a partition that the bootloader doesn't boot from. The LED blink code runs (proving SOME code executes), but BLE uses the name from a different partition's firmware.
+
+#### Suggestion for Mac-Claude
+1. **Check partition table**: `esptool read_flash` or `parttool.py` to see the actual partition layout
+2. **Try `esptool write_flash 0x0`** to overwrite from the very start (bootloader + all)
+3. **Or flash with a merged binary** that includes bootloader + partition table + app, ensuring everything is overwritten
+4. Consider using `esptool --chip esp32c3 write_flash 0x10000 firmware.bin` to explicitly target the app0 offset
+
+---
+
 ## Test 40c — 2026-03-17 22:50 UTC (raw advertisement scan)
 
 **Pi state:** BT restarted, cache cleared, device removed from bluetoothctl
