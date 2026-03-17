@@ -316,11 +316,19 @@ async def main():
 
     while True:
         try:
-            # After 3+ consecutive failures, try clearing BlueZ cache as recovery
+            # After 3 consecutive failures, restart bluetooth service to clear degraded state
             if consecutive_failures >= 3:
+                log(f"Recovery: restarting bluetooth service after {consecutive_failures} failures", "WARN")
+                try:
+                    subprocess.run(["sudo", "systemctl", "restart", "bluetooth"],
+                                   capture_output=True, timeout=10)
+                    await asyncio.sleep(3)
+                    log("Bluetooth service restarted for recovery")
+                except Exception as e:
+                    log(f"Service restart failed: {e}", "WARN")
                 addr_to_remove = connected_address or KNOWN_MAC
-                log(f"Recovery: removing {addr_to_remove} from BlueZ cache after {consecutive_failures} failures", "WARN")
                 await remove_bluez_device(addr_to_remove)
+                connected_address = None  # Force fresh scan after restart
                 consecutive_failures = 0
 
             # Fast path: if we've connected before, skip scanning entirely
