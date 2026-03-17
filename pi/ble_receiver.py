@@ -20,7 +20,7 @@ from bleak.exc import BleakError
 DEVICE_NAME = "BLE-Remote"
 SERVICE_UUID = "4e520001-7354-4288-9a71-81a9bf56c4a8"
 BUTTON_CHAR_UUID = "4e520002-7354-4288-9a71-81a9bf56c4a8"
-KNOWN_MAC = "38:44:BE:45:AD:86"  # ESP32-C3 BLE address (for pre-scan cache clearing)
+KNOWN_MAC = "A0:F2:62:EC:7A:D0"  # ESP32-S3 SuperMini BLE address
 
 # Timing — tuned for fast reconnection
 SCAN_TIMEOUT = 8.0         # max seconds to scan (usually finds device in <1s)

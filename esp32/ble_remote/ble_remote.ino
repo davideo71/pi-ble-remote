@@ -1,10 +1,8 @@
 /*
- * BLE Remote - ESP32-C3 GATT Server
+ * BLE Remote - ESP32-S3 GATT Server
  *
- * Test 34: Interrupt-driven buttons — no digitalRead in loop.
- * Tests 32-33 proved that polling digitalRead() on 5 pins disrupts NimBLE
- * on the single-core C3. This version uses attachInterrupt() so GPIO is
- * only accessed on actual pin changes, not every loop iteration.
+ * Test S3-1: Heartbeat only — confirm BLE works on the S3 SuperMini.
+ * Dual-core S3 gives NimBLE its own core — no starvation issues.
  */
 
 #include <NimBLEDevice.h>
@@ -12,37 +10,6 @@
 // Custom UUIDs for our remote service
 #define SERVICE_UUID        "4e520001-7354-4288-9a71-81a9bf56c4a8"
 #define BUTTON_CHAR_UUID    "4e520002-7354-4288-9a71-81a9bf56c4a8"
-
-// Button configuration
-struct Button {
-    uint8_t pin;
-    char pressChar;
-    char releaseChar;
-    volatile bool changed;      // set by ISR
-    bool pressed;               // debounced state
-    unsigned long lastChangeTime; // for debounce
-};
-
-#define NUM_BUTTONS 5
-#define DEBOUNCE_MS 50
-
-Button buttons[NUM_BUTTONS] = {
-    {0, 'L', 'l', false, false, 0},
-    {1, 'R', 'r', false, false, 0},
-    {2, 'U', 'u', false, false, 0},
-    {3, 'D', 'd', false, false, 0},
-    {4, 'O', 'o', false, false, 0},
-};
-
-// ISR handlers — one per button, just sets the changed flag
-void IRAM_ATTR isr_btn0() { buttons[0].changed = true; }
-void IRAM_ATTR isr_btn1() { buttons[1].changed = true; }
-void IRAM_ATTR isr_btn2() { buttons[2].changed = true; }
-void IRAM_ATTR isr_btn3() { buttons[3].changed = true; }
-void IRAM_ATTR isr_btn4() { buttons[4].changed = true; }
-
-typedef void (*isr_func_t)();
-isr_func_t isrHandlers[NUM_BUTTONS] = { isr_btn0, isr_btn1, isr_btn2, isr_btn3, isr_btn4 };
 
 NimBLEServer* pServer = nullptr;
 NimBLECharacteristic* pButtonChar = nullptr;
@@ -53,7 +20,6 @@ uint32_t heartbeatCounter = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastMemReport = 0;
 unsigned long lastAdvRestart = 0;
-unsigned long bootTime = 0;
 
 // Helper: milliseconds since boot as readable timestamp
 void printTimestamp() {
@@ -63,7 +29,7 @@ void printTimestamp() {
     Serial.printf("[%02lu:%02lu.%03lu] ", mins, secs % 60, ms % 1000);
 }
 
-// Server callbacks - log every connection event
+// Server callbacks
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
         deviceConnected = true;
@@ -80,7 +46,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         printTimestamp();
         Serial.printf("  Free heap: %d bytes\n", ESP.getFreeHeap());
 
-        // Request relaxed connection parameters from the central (Pi)
         pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 600);
         printTimestamp();
         Serial.println("  Requested conn params: interval=30-60ms, latency=0, timeout=6000ms");
@@ -93,10 +58,9 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         printTimestamp();
         Serial.printf("  Reason: 0x%02X (%d)\n", reason, reason);
 
-        // Critical: restart advertising so the Pi can reconnect
         NimBLEDevice::startAdvertising();
         printTimestamp();
-        Serial.println("  Advertising restarted - ready for reconnection");
+        Serial.println("  Advertising restarted");
     }
 
     void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) override {
@@ -121,30 +85,19 @@ class ButtonCharCallbacks : public NimBLECharacteristicCallbacks {
 
 void setup() {
     Serial.begin(115200);
-    delay(1000);
-
-    bootTime = millis();
+    delay(2000);  // Extra delay for native USB CDC to initialize
 
     Serial.println("\n\n");
     Serial.println("============================================");
-    Serial.println("  BLE Remote - ESP32-C3 GATT Server");
-    Serial.println("  Test 34: Interrupt-driven buttons, 10ms");
+    Serial.println("  BLE Remote - ESP32-S3 SuperMini");
+    Serial.println("  Test S3-1: Heartbeat only");
     Serial.println("============================================");
     printTimestamp();
-    Serial.printf("Boot reason: %d\n", esp_reset_reason());
+    Serial.printf("Chip: %s Rev %d | Cores: %d | CPU: %dMHz\n",
+        ESP.getChipModel(), ESP.getChipRevision(),
+        ESP.getChipCores(), ESP.getCpuFreqMHz());
     printTimestamp();
-    Serial.printf("Free heap at boot: %d bytes\n", ESP.getFreeHeap());
-
-    // Initialize button GPIOs with interrupts
-    printTimestamp();
-    Serial.println("Initializing buttons (GPIO 0-4, INPUT_PULLUP, interrupt on CHANGE)...");
-    for (int i = 0; i < NUM_BUTTONS; i++) {
-        pinMode(buttons[i].pin, INPUT_PULLUP);
-        attachInterrupt(buttons[i].pin, isrHandlers[i], CHANGE);
-        printTimestamp();
-        Serial.printf("  GPIO %d = '%c'/'%c' — interrupt attached\n",
-            buttons[i].pin, buttons[i].pressChar, buttons[i].releaseChar);
-    }
+    Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
 
     // Initialize NimBLE
     printTimestamp();
@@ -187,32 +140,7 @@ void setup() {
 void loop() {
     unsigned long now = millis();
 
-    // ---- Process button interrupts (only when a pin actually changed) ----
-    for (int i = 0; i < NUM_BUTTONS; i++) {
-        if (!buttons[i].changed) continue;
-
-        // Debounce: ignore changes within DEBOUNCE_MS of last change
-        if ((now - buttons[i].lastChangeTime) < DEBOUNCE_MS) {
-            buttons[i].changed = false;
-            continue;
-        }
-
-        buttons[i].changed = false;
-        buttons[i].lastChangeTime = now;
-
-        // Read current state — single digitalRead only when ISR fired
-        bool pressed = !digitalRead(buttons[i].pin);  // LOW = pressed
-
-        if (pressed != buttons[i].pressed) {
-            buttons[i].pressed = pressed;
-            printTimestamp();
-            Serial.printf("BUTTON: '%c' [GPIO %d]\n",
-                pressed ? buttons[i].pressChar : buttons[i].releaseChar,
-                buttons[i].pin);
-        }
-    }
-
-    // ---- Heartbeat every 2s ----
+    // Heartbeat every 2s
     if (deviceConnected && (now - lastHeartbeat >= 2000)) {
         lastHeartbeat = now;
         heartbeatCounter++;
@@ -234,7 +162,7 @@ void loop() {
         wasConnected = true;
         heartbeatCounter = 0;
         printTimestamp();
-        Serial.println("State: DISCONNECTED -> CONNECTED (interrupt-driven buttons)");
+        Serial.println("State: DISCONNECTED -> CONNECTED");
     }
 
     // Re-start advertising every 30 seconds when not connected
@@ -249,11 +177,12 @@ void loop() {
     if (now - lastMemReport >= 30000) {
         lastMemReport = now;
         printTimestamp();
-        Serial.printf("STATUS: heap=%d | connected=%s | heartbeats=%d\n",
+        Serial.printf("STATUS: heap=%d | connected=%s | heartbeats=%d | cores=%d\n",
             ESP.getFreeHeap(),
             deviceConnected ? "YES" : "NO",
-            heartbeatCounter);
+            heartbeatCounter,
+            ESP.getChipCores());
     }
 
-    delay(10);  // 10ms loop — but no GPIO access unless ISR fired
+    delay(10);
 }
