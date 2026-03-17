@@ -1,5 +1,47 @@
 # Pi Test Report: Step 2 — Button Handling
 
+## Test 40 — 2026-03-17 22:25 UTC (NVS erase in firmware)
+
+**Duration:** 2 minutes (timeout)
+**Pi state:** BT restarted, BlueZ cache cleared, device removed from bluetoothctl
+
+### Result: FAIL — STILL "EasyPlay", connection still times out
+
+#### Device name: STILL "EasyPlay"
+Even with `nvs_flash_erase()` in firmware setup(), the device at `38:44:BE:45:AD:86` still advertises as "EasyPlay".
+
+#### Scan result (pre-test)
+```
+  38:44:BE:45:AD:86  RSSI=-81  name=EasyPlay  UUIDs=['4e520001-...']  <-- STILL EASYPLAY
+  (+ 6 other neighborhood devices)
+```
+
+#### Connection: 2 attempts, both timeout at 15s. 0 heartbeats.
+
+#### This confirms: the firmware being flashed is NOT running on this device
+
+The "EasyPlay" name has now survived:
+1. `esptool erase_flash` (full flash erase)
+2. OTA data partition erase
+3. NVS partition erase
+4. App1 partition erase
+5. `nvs_flash_erase()` in firmware code
+6. Multiple reflashes
+
+**This is impossible if the erase/flash operations are targeting this device.** The device at `38:44:BE:45:AD:86` is running completely different firmware than what's being flashed.
+
+#### Most likely explanation
+There are **two ESP32 boards**:
+- **Board A** (being flashed via USB): This is the C3 that Mac-Claude is erasing/flashing. Its LED blinks. But its BLE may not be working, or it has a different MAC.
+- **Board B** (`38:44:BE:45:AD:86`, "EasyPlay"): This is a DIFFERENT board still powered on somewhere, running old EasyPlay firmware. It has our service UUID because it was previously flashed with our code.
+
+#### Definitive test
+**Power off ALL ESP32 boards**, then scan from Pi:
+- If "EasyPlay" disappears → it IS one of our boards, just not the one being flashed
+- If "EasyPlay" remains → it's a neighbor's device (unlikely given our service UUID)
+
+---
+
 ## Test 39b — 2026-03-17 22:12 UTC (after OTA+NVS+app1 erase)
 
 **Duration:** 2 minutes (timeout)
