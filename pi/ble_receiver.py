@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """
-BLE Remote Receiver - Raspberry Pi
+BLE Remote Receiver v2 - Raspberry Pi
 
-Step 1: Connect to ESP32-C3 "BLE-Remote", subscribe to heartbeat
-notifications, and log everything with verbose debug output.
-Reconnects automatically on disconnect.
+Supports both firmware variants:
+  - "BLE-Remote" (Arduino/NimBLE on ESP32-C3) — custom service UUID
+  - "EasyPlay"   (MicroPython on ESP32-S3)    — Nordic UART Service
+
+Key fix: proper BlueZ cache clearing (stop → delete → restart) to prevent
+stale cached GATT data from causing connection timeouts. BlueZ aggressively
+caches device names, GATT tables, and connection parameters in memory.
+Deleting on-disk cache while bluetoothd is running does nothing — the daemon
+just regenerates it from its in-memory copy.
 """
 
 import asyncio
@@ -16,26 +22,40 @@ from datetime import datetime
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 
-# Must match the ESP32 firmware
-DEVICE_NAME = "BLE-Remote"
-SERVICE_UUID = "4e520001-7354-4288-9a71-81a9bf56c4a8"
-BUTTON_CHAR_UUID = "4e520002-7354-4288-9a71-81a9bf56c4a8"
-KNOWN_MAC = "38:44:BE:45:AD:86"  # ESP32-C3 BLE address (base MAC +2)
+# ── Device profiles ──────────────────────────────────────────────────────────
+# BLE-Remote (C3, Arduino/NimBLE)
+BLEREMOTE_NAME       = "BLE-Remote"
+BLEREMOTE_SERVICE    = "4e520001-7354-4288-9a71-81a9bf56c4a8"
+BLEREMOTE_CHAR       = "4e520002-7354-4288-9a71-81a9bf56c4a8"
+BLEREMOTE_MAC        = "38:44:BE:45:AD:86"
 
-# Timing — tuned for fast reconnection
-SCAN_TIMEOUT = 8.0         # max seconds to scan (usually finds device in <1s)
-CONNECT_TIMEOUT = 15.0     # seconds to wait for connection (10s caused early timeouts)
-RECONNECT_DELAY = 1.0      # seconds between reconnection attempts (fast!)
-MAX_RECONNECT_DELAY = 10.0 # max backoff delay
+# EasyPlay (S3, MicroPython) — Nordic UART Service
+EASYPLAY_NAME        = "EasyPlay"
+EASYPLAY_SERVICE     = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+EASYPLAY_TX_CHAR     = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # notifications from ESP32
+EASYPLAY_MAC         = None  # set after first scan
 
-# State — start with None so first connection uses scan (populates BlueZ cache).
-# Direct-connect by MAC only works after a successful connection in this session.
+# Which device we're connected to (detected at scan time)
+active_profile = None  # "bleremote" or "easyplay"
+
+# All known names and UUIDs to match during scanning
+KNOWN_NAMES    = {BLEREMOTE_NAME, EASYPLAY_NAME}
+KNOWN_SERVICES = {BLEREMOTE_SERVICE.lower(), EASYPLAY_SERVICE.lower()}
+KNOWN_MACS     = {BLEREMOTE_MAC}
+
+# ── Timing ───────────────────────────────────────────────────────────────────
+SCAN_TIMEOUT       = 15.0    # longer scan — S3 may be waking from sleep
+CONNECT_TIMEOUT    = 15.0
+RECONNECT_DELAY    = 1.0
+MAX_RECONNECT_DELAY = 10.0
+
+# State
 connected_address = None
 
 
 def ts():
     """Timestamp prefix for log lines."""
-    return datetime.now().strftime("[%H:%M:%S.%f]")[:-3] + "]"
+    return datetime.now().strftime("[%H:%M:%S.%f")[:-3] + "]"
 
 
 def log(msg, level="INFO"):
@@ -44,29 +64,27 @@ def log(msg, level="INFO"):
 
 
 BUTTON_NAMES = {
-    'L': 'LEFT press', 'l': 'LEFT release',
+    'L': 'LEFT press',  'l': 'LEFT release',
     'R': 'RIGHT press', 'r': 'RIGHT release',
-    'U': 'UP press', 'u': 'UP release',
-    'D': 'DOWN press', 'd': 'DOWN release',
-    'O': 'ON/OFF press', 'o': 'ON/OFF release',
+    'U': 'UP press',    'u': 'UP release',
+    'D': 'DOWN press',  'd': 'DOWN release',
+    'O': 'ON/OFF press','o': 'ON/OFF release',
 }
 
 
 def notification_handler(characteristic, data: bytearray):
     """Called for every BLE notification received."""
-    hex_str = data.hex()
-
-    # Single byte = button event (ASCII char)
+    # Single byte = button event (ASCII char) — EasyPlay sends these
     if len(data) == 1:
         char = chr(data[0])
         name = BUTTON_NAMES.get(char, f"unknown({char})")
-        log(f"BUTTON: '{char}' → {name}")
-    # 4 bytes = heartbeat counter
+        log(f"BUTTON: '{char}' -> {name}")
+    # 4 bytes = heartbeat counter — BLE-Remote sends these
     elif len(data) == 4:
         value = struct.unpack("<I", data)[0]
         log(f"HEARTBEAT #{value}")
     else:
-        log(f"NOTIFICATION: raw={hex_str} ({len(data)} bytes)")
+        log(f"NOTIFICATION: raw={data.hex()} ({len(data)} bytes)")
 
 
 def disconnected_callback(client: BleakClient):
@@ -74,144 +92,157 @@ def disconnected_callback(client: BleakClient):
     log(f"DISCONNECTED from {client.address}", "WARN")
 
 
-async def scan_for_device():
-    """Scan for our BLE remote device. Returns the device or None.
+# ── BlueZ cache management ──────────────────────────────────────────────────
 
-    Strategy for speed:
-    1. If we have a cached MAC, try a quick address-based scan first (no reset needed)
-    2. If that fails, do a full scan with adapter reset to clear BlueZ state
-    3. Stop scanning the moment we find our device (don't wait for timeout)
+async def nuclear_cache_clear():
+    """Stop bluetoothd, delete ALL on-disk caches, restart.
+
+    This is the ONLY reliable way to clear BlueZ cache. The daemon keeps
+    everything in memory, so deleting files while it's running is useless —
+    it regenerates them immediately from its in-memory copy.
+
+    This fixes:
+      - Stale device names (e.g. "EasyPlay" showing for a device now named "BLE-Remote")
+      - Stale GATT service tables causing connection timeouts
+      - Stale connection parameters from previous firmware versions
     """
-    global connected_address
+    log("Nuclear cache clear: stop bluetooth -> delete cache -> restart...")
+    try:
+        subprocess.run(["sudo", "systemctl", "stop", "bluetooth"],
+                       capture_output=True, timeout=10)
+        await asyncio.sleep(0.5)
+        # Delete ALL cached device data while daemon is stopped
+        subprocess.run(["sudo", "bash", "-c", "rm -rf /var/lib/bluetooth/*/cache/*"],
+                       capture_output=True, timeout=5)
+        subprocess.run(["sudo", "systemctl", "start", "bluetooth"],
+                       capture_output=True, timeout=10)
+        await asyncio.sleep(3)  # BlueZ LE subsystem needs time to initialize
+        log("Nuclear cache clear complete")
+    except Exception as e:
+        log(f"Nuclear cache clear failed: {e}", "ERROR")
+        # Fallback: try just power cycling the adapter
+        await adapter_reset()
 
-    # Fast path: if we've connected before, try by address without resetting
-    if connected_address:
-        log(f"Quick scan for known address {connected_address}...")
-        device = await BleakScanner.find_device_by_address(
-            connected_address, timeout=3.0,
-            scanning_mode="active",
+
+async def adapter_reset():
+    """Quick adapter reset — use between connection attempts."""
+    log("Adapter reset (power off/on)...")
+    try:
+        subprocess.run(["bluetoothctl", "power", "off"],
+                       capture_output=True, timeout=5)
+        await asyncio.sleep(1)
+        subprocess.run(["bluetoothctl", "power", "on"],
+                       capture_output=True, timeout=5)
+        await asyncio.sleep(2)
+        log("Adapter reset complete")
+    except Exception as e:
+        log(f"Adapter reset failed: {e}", "ERROR")
+
+
+async def remove_device(address):
+    """Remove a specific device from BlueZ to force fresh GATT discovery."""
+    log(f"Removing {address} from BlueZ...")
+    try:
+        result = subprocess.run(
+            ["bluetoothctl", "remove", address],
+            capture_output=True, text=True, timeout=5
         )
-        if device:
-            log(f"Found by address in quick scan: {device.name} ({device.address})")
-            return device
-        log("Quick scan failed, falling back to full scan with adapter reset", "WARN")
+        if result.returncode == 0:
+            log(f"  Removed from BlueZ")
+        else:
+            log(f"  Not in cache (OK)", "DEBUG")
+        await asyncio.sleep(0.3)
+    except Exception:
+        pass
 
-    # Full scan path: reset adapter to clear BlueZ duplicate filter.
-    # Do NOT remove from BlueZ cache here — removal forces BlueZ to
-    # re-discover from scratch and the first connection after fresh
-    # discovery consistently fails (Tests 16-17). Only use removal
-    # as a recovery step after multiple failed connections (see main loop).
-    await reset_bluetooth_adapter()
 
-    log(f"Scanning for BLE devices (max {SCAN_TIMEOUT}s, early exit on match)...")
+# ── Scanning ─────────────────────────────────────────────────────────────────
 
-    devices_found = 0
+async def scan_for_device():
+    """Scan for any known ESP32 remote. Returns (device, profile_name) or (None, None).
+
+    Matches by: service UUID, device name, or known MAC address.
+    Supports both BLE-Remote and EasyPlay firmware.
+    """
+    global active_profile
+
+    await adapter_reset()
+
+    log(f"Scanning for BLE devices (max {SCAN_TIMEOUT}s)...")
+    log(f"  Looking for names: {KNOWN_NAMES}")
+    log(f"  Looking for services: {KNOWN_SERVICES}")
+
     target_device = None
-    scan_done = asyncio.Event()  # Signal to stop scanning early
+    target_profile = None
+    devices_found = 0
+    scan_done = asyncio.Event()
 
-    def detection_callback(device, advertisement_data):
-        nonlocal devices_found, target_device
+    def detection_callback(device, adv):
+        nonlocal target_device, target_profile, devices_found
         devices_found += 1
 
-        # Match by service UUID, name, or known MAC address
-        has_our_uuid = SERVICE_UUID in [str(u).lower() for u in advertisement_data.service_uuids]
-        is_our_mac = device.address and device.address.upper() == KNOWN_MAC
-        is_our_name = device.name in (DEVICE_NAME, "EasyPlay")  # EasyPlay = old cached name
+        adv_uuids = {str(u).lower() for u in (adv.service_uuids or [])}
+        has_our_uuid = bool(adv_uuids & KNOWN_SERVICES)
+        is_known_mac = device.address and device.address.upper() in KNOWN_MACS
+        is_known_name = (device.name in KNOWN_NAMES) or (adv.local_name in KNOWN_NAMES if adv.local_name else False)
 
-        if has_our_uuid or is_our_mac or is_our_name:
-            match_reason = "UUID" if has_our_uuid else ("MAC" if is_our_mac else "name")
-            log(f"  SCAN: ** MATCH ({match_reason}) ** {device.address} name={device.name!r} "
-                f"RSSI={advertisement_data.rssi}dBm UUIDs={advertisement_data.service_uuids}", "DEBUG")
+        if has_our_uuid or is_known_mac or is_known_name:
+            # Determine which profile
+            if BLEREMOTE_SERVICE.lower() in adv_uuids or device.name == BLEREMOTE_NAME:
+                target_profile = "bleremote"
+            elif EASYPLAY_SERVICE.lower() in adv_uuids or device.name == EASYPLAY_NAME:
+                target_profile = "easyplay"
+            else:
+                target_profile = "bleremote"  # default
+
+            match_reason = "UUID" if has_our_uuid else ("MAC" if is_known_mac else "name")
+            log(f"  ** MATCH ({match_reason}, profile={target_profile}) ** "
+                f"{device.address} name={device.name!r} "
+                f"RSSI={adv.rssi}dBm UUIDs={list(adv_uuids)}")
             target_device = device
-            scan_done.set()  # Stop scanning immediately!
-        elif devices_found <= 5:
-            log(f"  SCAN: {device.address} name={device.name!r} RSSI={advertisement_data.rssi}dBm", "DEBUG")
+            scan_done.set()
+        elif devices_found <= 8:
+            log(f"  {device.address} name={device.name!r} RSSI={adv.rssi}dBm", "DEBUG")
 
-    # Active scanning triggers ESP32's scan response containing the service UUID
     scanner = BleakScanner(
         detection_callback=detection_callback,
         scanning_mode="active",
     )
     await scanner.start()
-
-    # Wait for either: device found (early exit) or timeout
     try:
         await asyncio.wait_for(scan_done.wait(), timeout=SCAN_TIMEOUT)
-        log(f"Early exit: device found after scanning {devices_found} devices")
+        log(f"Device found after scanning {devices_found} devices")
     except asyncio.TimeoutError:
         log(f"Scan timeout: {devices_found} devices seen, target not found", "WARN")
-
     await scanner.stop()
 
     if target_device:
-        log(f"Found target: {target_device.name} ({target_device.address})")
+        active_profile = target_profile
+        log(f"Target: {target_device.name} ({target_device.address}) profile={active_profile}")
         return target_device
 
-    # Fallback: check by name in case service UUID wasn't in advertisement
-    for d in scanner.discovered_devices:
-        if d.name == DEVICE_NAME:
-            log(f"Found target by name: {d.name} ({d.address})")
-            return d
-
-    log(f"Device not found (tried service UUID and name '{DEVICE_NAME}')", "WARN")
+    log("Device not found. Note: EasyPlay sleeps after 3min — press a button to wake it!", "WARN")
     return None
 
 
-async def remove_bluez_device(address):
-    """Remove a device from BlueZ cache to force fresh LE connection."""
-    log(f"Removing {address} from BlueZ cache...")
-    result = subprocess.run(
-        ["bluetoothctl", "remove", address],
-        capture_output=True, text=True, timeout=5
-    )
-    if result.returncode == 0:
-        log(f"  Removed from BlueZ cache")
-    else:
-        log(f"  Not in cache (OK): {result.stderr.strip()}", "DEBUG")
-    await asyncio.sleep(0.3)
-
-
-async def connect_and_listen_by_address(address):
-    """Connect directly by MAC address (skip scanning). Used for reconnection."""
-    global connected_address
-
-    # Full adapter reset before reconnect. Light reset (disconnect + hci reset)
-    # was unreliable — failed to clear InProgress in Tests 23-24.
-    # The 4s overhead is worth the reliability.
-    await reset_bluetooth_adapter()
-
-    log(f"Connecting to {address} by address (timeout={CONNECT_TIMEOUT}s)...")
-
-    async with BleakClient(
-        address,
-        disconnected_callback=disconnected_callback,
-        timeout=CONNECT_TIMEOUT,
-    ) as client:
-        log("========== CONNECTED (direct) ==========")
-        log(f"  Address: {client.address}")
-        log(f"  MTU: {client.mtu_size}")
-        connected_address = client.address
-
-        # Subscribe to button characteristic
-        log(f"Subscribing to notifications on {BUTTON_CHAR_UUID}...")
-        await client.start_notify(BUTTON_CHAR_UUID, notification_handler)
-        log("Subscribed - listening for notifications")
-        log("--------------------------------------------")
-
-        # Stay connected and print a status line periodically
-        while client.is_connected:
-            await asyncio.sleep(5.0)
-            if client.is_connected:
-                log(f"STATUS: connected={client.is_connected} mtu={client.mtu_size}")
-
-    log("Connection closed (BleakClient exited)")
-
+# ── Connection ───────────────────────────────────────────────────────────────
 
 async def connect_and_listen(device):
-    """Connect to the device, subscribe, and listen until disconnect."""
-    global connected_address
+    """Connect, subscribe to notifications, and listen until disconnect."""
+    global connected_address, active_profile
 
-    log(f"Connecting to {device.address} (timeout={CONNECT_TIMEOUT}s)...")
+    # Remove device from BlueZ before connecting — forces fresh GATT discovery
+    # This prevents stale cached GATT tables from causing timeouts
+    await remove_device(device.address)
+    await asyncio.sleep(0.5)
+
+    # Pick the right characteristic UUID based on detected profile
+    if active_profile == "easyplay":
+        char_uuid = EASYPLAY_TX_CHAR
+    else:
+        char_uuid = BLEREMOTE_CHAR
+
+    log(f"Connecting to {device.address} (profile={active_profile}, timeout={CONNECT_TIMEOUT}s)...")
 
     async with BleakClient(
         device,
@@ -221,6 +252,7 @@ async def connect_and_listen(device):
         log("========== CONNECTED ==========")
         log(f"  Address: {client.address}")
         log(f"  MTU: {client.mtu_size}")
+        log(f"  Profile: {active_profile}")
         connected_address = client.address
 
         # List services for debug
@@ -229,101 +261,41 @@ async def connect_and_listen(device):
             log(f"    [{service.uuid}] {service.description}")
             for char in service.characteristics:
                 props = ", ".join(char.properties)
-                log(f"      [{char.uuid}] {char.description} ({props})")
+                log(f"      [{char.uuid}] ({props})")
 
-        # Subscribe to button characteristic
-        log(f"Subscribing to notifications on {BUTTON_CHAR_UUID}...")
-        await client.start_notify(BUTTON_CHAR_UUID, notification_handler)
-        log("Subscribed - listening for notifications")
+        # Subscribe to notifications
+        log(f"Subscribing to {char_uuid}...")
+        await client.start_notify(char_uuid, notification_handler)
+        log("Subscribed — listening for notifications")
         log("--------------------------------------------")
 
-        # Stay connected and print a status line periodically
+        # Stay connected
         while client.is_connected:
             await asyncio.sleep(5.0)
             if client.is_connected:
-                log(f"STATUS: connected={client.is_connected} mtu={client.mtu_size}")
+                log(f"STATUS: connected=yes mtu={client.mtu_size} profile={active_profile}")
 
-    log("Connection closed (BleakClient exited)")
-
-
-async def light_reset(address):
-    """Light reset: disconnect device + HCI reset instead of full power cycle.
-
-    Step 2: bluetoothctl disconnect — clears BlueZ connection state
-    Step 3: hciconfig hci0 reset — HCI-level reset (what EasyPlay uses)
-    Should clear InProgress errors in ~1-2s instead of 4s.
-    """
-    log(f"Light reset: disconnecting {address} + HCI reset...")
-    try:
-        subprocess.run(
-            ["bluetoothctl", "disconnect", address],
-            capture_output=True, text=True, timeout=5
-        )
-        await asyncio.sleep(0.3)
-        subprocess.run(
-            ["hciconfig", "hci0", "reset"],
-            capture_output=True, text=True, timeout=5
-        )
-        await asyncio.sleep(1.0)
-        log("Light reset complete (~1.3s)")
-    except Exception as e:
-        log(f"Light reset failed: {e}, falling back to full reset", "WARN")
-        await reset_bluetooth_adapter()
+    log("Connection closed")
 
 
-async def reset_bluetooth_adapter(clear_cache=False):
-    """Reset the BlueZ adapter to recover from stuck states.
-
-    Args:
-        clear_cache: If True, stop bluetooth, delete on-disk cache, then restart.
-                     This prevents BlueZ from regenerating cache from memory.
-                     Use on startup and after multiple failures.
-
-    Timing: ~4-5s total. BlueZ LE subsystem needs 3s after power-on.
-    """
-    if clear_cache:
-        log("Full BT reset: stop → clear cache → start...")
-        try:
-            subprocess.run(["sudo", "systemctl", "stop", "bluetooth"],
-                           capture_output=True, timeout=10)
-            await asyncio.sleep(1)
-            # Delete cache while bluetooth is STOPPED (prevents regeneration from memory)
-            subprocess.run(["sudo", "bash", "-c", "rm -rf /var/lib/bluetooth/*/cache/*"],
-                           capture_output=True, timeout=5)
-            subprocess.run(["sudo", "systemctl", "start", "bluetooth"],
-                           capture_output=True, timeout=10)
-            await asyncio.sleep(3)
-            log("Full BT reset complete (cache cleared)")
-        except Exception as e:
-            log(f"Full reset failed: {e}", "ERROR")
-    else:
-        log("Cycling Bluetooth adapter off/on...")
-        try:
-            subprocess.run(["bluetoothctl", "power", "off"], capture_output=True, timeout=5)
-            await asyncio.sleep(1)
-            subprocess.run(["bluetoothctl", "power", "on"], capture_output=True, timeout=5)
-            await asyncio.sleep(3)
-            log("Bluetooth adapter reset complete")
-        except Exception as e:
-            log(f"Adapter reset failed: {e}", "ERROR")
-
+# ── Main loop ────────────────────────────────────────────────────────────────
 
 async def main():
-    """Main reconnection loop."""
+    """Main reconnection loop with proper BlueZ cache management."""
     print()
     print("============================================")
-    print("  BLE Remote Receiver - Raspberry Pi")
-    print("  Step 2: Buttons + Connection")
+    print("  BLE Remote Receiver v2 — Raspberry Pi")
+    print("  Supports: BLE-Remote + EasyPlay")
     print("============================================")
-    log(f"Target device: {DEVICE_NAME}")
-    log(f"Service UUID:  {SERVICE_UUID}")
-    log(f"Char UUID:     {BUTTON_CHAR_UUID}")
+    log(f"Known names:    {KNOWN_NAMES}")
+    log(f"Known services: {KNOWN_SERVICES}")
+    log(f"Known MACs:     {KNOWN_MACS}")
 
-    # Clean BlueZ state on startup — stop, clear cache, restart
-    # This prevents stale cached device info from causing connection timeouts
-    await reset_bluetooth_adapter(clear_cache=True)
-    # Also remove our specific device from BlueZ to force fresh discovery
-    await remove_bluez_device(KNOWN_MAC)
+    # Nuclear cache clear on startup — THE critical fix
+    # This prevents stale BlueZ data from previous sessions
+    await nuclear_cache_clear()
+    for mac in KNOWN_MACS:
+        await remove_device(mac)
     print("--------------------------------------------\n")
 
     global connected_address
@@ -333,24 +305,16 @@ async def main():
 
     while True:
         try:
-            # After 3 consecutive failures, full reset with cache clear
+            # After 3 consecutive failures, nuclear cache clear
             if consecutive_failures >= 3:
-                log(f"Recovery: full BT reset + cache clear after {consecutive_failures} failures", "WARN")
-                await reset_bluetooth_adapter(clear_cache=True)
-                addr_to_remove = connected_address or KNOWN_MAC
-                await remove_bluez_device(addr_to_remove)
-                connected_address = None  # Force fresh scan after restart
+                log(f"Recovery: nuclear cache clear after {consecutive_failures} failures", "WARN")
+                await nuclear_cache_clear()
+                if connected_address:
+                    await remove_device(connected_address)
+                connected_address = None
                 consecutive_failures = 0
 
-            # Fast path: if we've connected before, skip scanning entirely
-            # and connect directly by MAC address
-            if connected_address:
-                log(f"Direct connect to known address {connected_address} (no scan)...")
-                await connect_and_listen_by_address(connected_address)
-                consecutive_failures = 0
-                continue
-
-            # Cold start: need to scan to find the device
+            # Scan for device
             device = await scan_for_device()
             if device is None:
                 consecutive_failures += 1
@@ -365,17 +329,18 @@ async def main():
             # Connect and listen
             await connect_and_listen(device)
 
-            # If we get here, connection was established and then closed cleanly
+            # Connection was established then closed — do adapter reset before reconnecting
+            # This clears any stale connection state in BlueZ
+            await adapter_reset()
             consecutive_failures = 0
 
         except BleakError as e:
             consecutive_failures += 1
-            error_str = str(e)
             log(f"BLE error: {e}", "ERROR")
-            if "InProgress" in error_str or "in progress" in error_str.lower():
-                log("BlueZ stuck — resetting adapter and retrying immediately...", "WARN")
-                await reset_bluetooth_adapter()
-                continue  # Skip the reconnect delay — retry now
+            if "InProgress" in str(e) or "in progress" in str(e).lower():
+                log("BlueZ stuck — nuclear cache clear...", "WARN")
+                await nuclear_cache_clear()
+                continue
         except asyncio.TimeoutError:
             consecutive_failures += 1
             log("Connection timed out", "ERROR")
@@ -383,7 +348,7 @@ async def main():
             consecutive_failures += 1
             log(f"OS error: {e}", "ERROR")
         except asyncio.CancelledError:
-            log("Shutting down...", "INFO")
+            log("Shutting down...")
             break
 
         log(f"Reconnecting in {reconnect_delay:.0f}s...")
