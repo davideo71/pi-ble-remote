@@ -1,5 +1,43 @@
 # Pi Test Report
 
+## Test 45 — 2026-03-18 14:40 UTC — ble_receiver v2 + EasyPlay
+
+### Result: FAIL — EasyPlay not found in 6 scan cycles (2 minutes)
+
+### ble_receiver.py v2 works great
+- Nuclear cache clear ran successfully on startup (stop BT → delete → restart)
+- Adapter reset (power off/on) worked before each scan
+- After 3 failures, triggered another nuclear cache clear — worked correctly
+- Script is solid, no errors
+
+### Scan details
+| Scan | Duration | Devices seen | Target found? |
+|------|----------|-------------|---------------|
+| 1 | 15s | 136 | No |
+| 2 | 15s | 135 | No |
+| 3 | 15s | 105 | No |
+| 4 (post-nuclear) | 15s | 122 | No |
+| 5 | 15s | 130 | No |
+| 6 | 15s | ~100+ | No (timed out) |
+
+No "EasyPlay", no "BLE-Remote", no Nordic UART service UUID detected across any scan.
+
+### Diagnosis
+**EasyPlay is almost certainly asleep.** Per TASK.md, EasyPlay sleeps after 3 minutes of inactivity and stops advertising. The user needs to **press a button on the remote** to trigger a 10-second wake burst (20ms advertising interval).
+
+The timing is tricky — we need someone to press the button while a scan is actively running.
+
+### Adapter
+- CSR8510 A10 USB dongle (hci0), working correctly
+- No onboard BT adapter detected (only hci0)
+
+### Next steps
+1. **User presses button on S3 remote** while Pi is scanning — need to catch the 10-second wake window
+2. Or: modify EasyPlay firmware to stay awake longer / not sleep during testing
+3. Could run a continuous background scan loop to catch the brief advertising burst
+
+---
+
 ## Status Update — 2026-03-18: Switched to ESP32-S3, not visible
 
 ### Summary
