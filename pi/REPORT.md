@@ -1,5 +1,40 @@
 # Pi Test Report
 
+## Test 45b — 2026-03-18 15:01 UTC — CONNECTED! 34 heartbeats!
+
+### Result: SUCCESS — Connected and received 34 heartbeats (stable)
+
+### Key discovery: S3 is running BLE-Remote firmware, NOT EasyPlay
+- **Device name: "BLE-Remote"** (not "EasyPlay")
+- **Service UUID: `4e520001-7354-4288-9a71-81a9bf56c4a8`** (our custom UUID, not Nordic UART)
+- **MAC: `A0:F2:62:EC:51:C9`** (different from C3's `38:44:BE:45:AD:86`)
+- **RSSI: -83 to -87 dBm** (still weak but stable enough)
+
+### Connection details
+- Found on first scan attempt, connected after a few retries
+- The `remove_device()` call was causing "device not found" errors — it removes the device from BlueZ right before connecting, so bleak can't find it. Connected on ~7th attempt when timing worked out.
+- **GATT service discovery: COMPLETE**
+  - Generic Access Profile (0x1800)
+  - Generic Attribute Profile (0x1801)
+  - Custom service `4e520001...` with characteristic `4e520002...` (read, notify)
+- **MTU: 23** (default)
+- Subscribed to notifications successfully
+
+### Heartbeat data
+- 34 heartbeats received over ~65 seconds
+- Consistent ~2 second interval
+- No drops, no disconnects — rock solid connection
+- Only stopped because test was time-limited to 2 minutes
+
+### Issues found
+1. **`remove_device()` before connect is counterproductive** — it removes the device from BlueZ's internal list, then bleak can't find it to connect. Should either skip the remove, or re-scan after removing.
+2. **RSSI still -83 to -87** — same weak signal as C3. This is a dongle issue, not an ESP issue.
+
+### Bug fix suggestion for ble_receiver.py
+The `remove_device()` call at line before `BleakClient.connect()` should be removed or moved. The scan already found a fresh device — removing it from BlueZ then trying to connect creates a race condition. The nuclear cache clear on startup is sufficient.
+
+---
+
 ## Test 45 — 2026-03-18 14:40 UTC — ble_receiver v2 + EasyPlay
 
 ### Result: FAIL — EasyPlay not found in 6 scan cycles (2 minutes)
