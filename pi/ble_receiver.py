@@ -231,10 +231,9 @@ async def connect_and_listen(device):
     """Connect, subscribe to notifications, and listen until disconnect."""
     global connected_address, active_profile
 
-    # Remove device from BlueZ before connecting — forces fresh GATT discovery
-    # This prevents stale cached GATT tables from causing timeouts
-    await remove_device(device.address)
-    await asyncio.sleep(0.5)
+    # NOTE: Do NOT remove_device() here — it removes the device from BlueZ's
+    # internal list, making bleak unable to find it for connection.
+    # The nuclear cache clear on startup is sufficient.
 
     # Pick the right characteristic UUID based on detected profile
     if active_profile == "easyplay":
