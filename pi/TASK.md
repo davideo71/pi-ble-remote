@@ -6,60 +6,33 @@
 - Mac-Claude polls `git pull` every 2 minutes to check for your results
 - Always commit and push REPORT.md when done, even if the test fails — Mac-Claude needs the results
 
-## NEW TEST — Test 45: ble_receiver v2 + EasyPlay support (triggered 2026-03-18)
+## NEW TEST — Test 45b: Fresh S3 with always-on advertising (triggered 2026-03-18)
 
-### Context — IMPORTANT BREAKTHROUGH
-We discovered that **BlueZ cache was the root cause of MOST of our connection problems** across all tests. Here's what happened:
+### What changed from Test 45
+- **Fresh ESP32-S3 SuperMini** flashed with Arduino/NimBLE firmware (not MicroPython EasyPlay)
+- **Always-on advertising** — NO sleep mode, device never stops advertising
+- **New MAC address: `A0:F2:62:EC:51:CA`** (base `A0:F2:62:EC:51:C8` + 2 for BLE)
+- Device name: "BLE-Remote"
+- Service UUID: `4e520001-7354-4288-9a71-81a9bf56c4a8`
+- Char UUID: `4e520002-7354-4288-9a71-81a9bf56c4a8`
+- Sends heartbeat (uint32 counter) every 2 seconds when connected
+- Advertising interval: 20-40ms (fast for testing)
+- TX power: +9 dBm (max)
+- Restarts advertising automatically after disconnect
 
-1. BlueZ aggressively caches device names, GATT tables, and connection parameters
-2. Deleting cache files while bluetoothd is running is **useless** — the daemon regenerates them from its in-memory copy instantly
-3. The ONLY way to clear the cache is: **stop bluetooth → delete files → restart bluetooth**
-4. This is why Test 35 (after Pi reboot) worked perfectly, and everything after degraded
-5. The "EasyPlay" ghost name was BlueZ cache all along (confirmed in Test 42)
-
-### What changed
-- **`ble_receiver.py` v2** — completely rewritten with:
-  - `nuclear_cache_clear()`: stops bluetoothd, deletes cache, restarts. Used on startup and after 3 failures.
-  - `remove_device()`: removes specific device from BlueZ before each connection (forces fresh GATT discovery)
-  - Supports BOTH firmware profiles:
-    - **BLE-Remote** (C3, Arduino/NimBLE) — custom UUID `4e520001...`, char `4e520002...`
-    - **EasyPlay** (S3, MicroPython) — Nordic UART `6e400001...`, TX char `6e400003...`
-  - Auto-detects which device is present and uses correct characteristic UUID
-
-### What's running on the ESP32
-An ESP32-S3 is currently plugged in running the **EasyPlay** MicroPython firmware.
-- Device name: "EasyPlay"
-- Service: Nordic UART Service (`6e400001-b5a3-f393-e0a9-e50e24dcca9e`)
-- **CRITICAL: EasyPlay goes to sleep after 3 minutes of inactivity and STOPS advertising!**
-- If you can't find it in a scan, the user will need to press a button on the remote to wake it
-- During wake burst, it advertises at 20ms intervals for 10 seconds
+### ble_receiver.py v2 update needed
+The receiver already supports this device. Just update the MAC:
+- Change `KNOWN_MAC` or add `A0:F2:62:EC:51:CA` to `KNOWN_MACS` set
+- Or just let it find by service UUID / name (should work without MAC)
 
 ### Steps
 1. `git pull` (check `git log --oneline -3` to confirm new commit)
-2. Run `python3 pi/ble_receiver.py` — it will:
-   - Nuclear cache clear on startup (stop BT → delete cache → restart)
-   - Scan for 15 seconds looking for "EasyPlay" or "BLE-Remote"
-   - Auto-detect the device profile
-   - Connect and subscribe to notifications
-3. If device not found on first scan, it will retry automatically
-4. Let it run for 2+ minutes to collect heartbeats or button events
-5. **Commit and push REPORT.md** with results
-
-### What to report
-- Did the nuclear cache clear work? (check log output)
-- Was the device found? Under what name? What RSSI?
-- Did it connect? Did GATT service discovery complete?
-- Were notifications received? (heartbeats from BLE-Remote, button chars from EasyPlay)
-- If EasyPlay: it sends heartbeat-like pings too — report what you receive
-- If connection failed: copy the exact error and the RSSI values
-
-### About the Pi's BLE adapter
-Previous tests used a CSR8510 USB dongle that showed very weak RSSI (-83 to -87 at 10cm). If possible:
-- Check which adapter is active: `hciconfig -a`
-- If both onboard and USB dongle exist, try the onboard one: pass `adapter="hci0"` or `adapter="hci1"` in the BleakScanner/BleakClient calls
-- Report which adapter was used and RSSI values
+2. Run `python3 pi/ble_receiver.py` for 2+ minutes
+3. Device should be found immediately (always advertising, no sleep)
+4. Report: RSSI, connection success, heartbeat count
+5. **Commit and push REPORT.md**
 
 ### Success criteria
-- Device found in scan (any name)
-- Connected and received notifications (heartbeats or button events)
-- No BlueZ cache-related errors
+- Device "BLE-Remote" found in scan with RSSI better than -80 dBm
+- Connected and GATT service discovery completes
+- Received 30+ heartbeats (= 1 minute connected)

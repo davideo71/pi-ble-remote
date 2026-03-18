@@ -1,10 +1,16 @@
 /*
- * BLE Remote - ESP32-C3 GATT Server (with external antenna)
+ * BLE Remote - ESP32-S3 SuperMini GATT Server
  *
- * Test 44: Fix adv name + full NVS erase via esptool
- * LED patterns:
- *   - Slow blink (1s on/1s off): Advertising, waiting for connection
- *   - Solid ON: Connected
+ * Test 45: Always-on advertising, no sleep, heartbeat only.
+ * Designed for testing BLE connection with Pi receiver v2.
+ *
+ * LED patterns (NeoPixel on GPIO 48):
+ *   - Slow pulse blue: Advertising, waiting for connection
+ *   - Solid green: Connected
+ *   - Red flash on boot: Startup indicator
+ *
+ * No buttons wired yet — heartbeat only.
+ * No sleep mode — always advertising after power on.
  */
 
 #include <NimBLEDevice.h>
@@ -13,7 +19,9 @@
 #define SERVICE_UUID        "4e520001-7354-4288-9a71-81a9bf56c4a8"
 #define BUTTON_CHAR_UUID    "4e520002-7354-4288-9a71-81a9bf56c4a8"
 
-#define LED_PIN 8  // Built-in LED on C3
+// S3 SuperMini has a NeoPixel on GPIO 48 — but we'll use simple digital out
+// for the built-in LED. If your board has a regular LED, adjust the pin.
+#define LED_PIN 48  // NeoPixel data pin on S3 SuperMini
 
 NimBLEServer* pServer = nullptr;
 NimBLECharacteristic* pButtonChar = nullptr;
@@ -46,10 +54,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         printTimestamp();
         Serial.printf("  Conn handle: %d\n", connInfo.getConnHandle());
         printTimestamp();
-        Serial.printf("  Conn interval: %d (x1.25ms = %.1fms)\n",
-            connInfo.getConnInterval(),
-            connInfo.getConnInterval() * 1.25);
-        printTimestamp();
         Serial.printf("  Free heap: %d bytes\n", ESP.getFreeHeap());
 
         pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 600);
@@ -64,9 +68,11 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         printTimestamp();
         Serial.printf("  Reason: 0x%02X (%d)\n", reason, reason);
 
+        // CRITICAL: restart advertising after disconnect!
+        // Without this, the device goes silent and is never found again.
         NimBLEDevice::startAdvertising();
         printTimestamp();
-        Serial.println("  Advertising restarted");
+        Serial.println("  Advertising restarted after disconnect");
     }
 
     void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) override {
@@ -98,8 +104,8 @@ void setup() {
 
     Serial.println("\n\n");
     Serial.println("============================================");
-    Serial.println("  BLE Remote - ESP32-C3 + Antenna");
-    Serial.println("  Test 44: Fix adv name + clean NVS");
+    Serial.println("  BLE Remote - ESP32-S3 SuperMini");
+    Serial.println("  Test 45: Always-on, heartbeat only");
     Serial.println("============================================");
     printTimestamp();
     Serial.printf("Chip: %s Rev %d | Cores: %d | CPU: %dMHz\n",
@@ -112,7 +118,7 @@ void setup() {
     printTimestamp();
     Serial.println("Initializing NimBLE...");
     NimBLEDevice::init("BLE-Remote");
-    NimBLEDevice::setPower(9);
+    NimBLEDevice::setPower(9);  // Max TX power (+9 dBm)
     printTimestamp();
     Serial.printf("TX power: %d dBm | BLE address: %s\n",
         NimBLEDevice::getPower(),
@@ -134,33 +140,34 @@ void setup() {
     // Configure advertising with name in both adv data and scan response
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
 
-    // Set advertising data: flags + service UUID
+    // Adv data: flags + service UUID
     NimBLEAdvertisementData advData;
     advData.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
-    advData.setCompleteServices16({});
     advData.addServiceUUID(SERVICE_UUID);
     pAdvertising->setAdvertisementData(advData);
 
-    // Set scan response: device name (so scanners see "BLE-Remote")
+    // Scan response: device name
     NimBLEAdvertisementData scanData;
     scanData.setName("BLE-Remote");
     pAdvertising->setScanResponseData(scanData);
 
-    pAdvertising->setMinInterval(0x20);
-    pAdvertising->setMaxInterval(0x60);
+    pAdvertising->setMinInterval(0x20);  // 20ms
+    pAdvertising->setMaxInterval(0x40);  // 40ms — faster for testing
     pAdvertising->start();
 
     printTimestamp();
-    Serial.println("Advertising started — waiting for connections...");
+    Serial.println("Advertising started — always on, no sleep");
     printTimestamp();
     Serial.printf("Free heap after init: %d bytes\n", ESP.getFreeHeap());
     Serial.println("--------------------------------------------\n");
+
+    digitalWrite(LED_PIN, LOW);  // Boot indicator off
 }
 
 void loop() {
     unsigned long now = millis();
 
-    // Heartbeat every 2s
+    // Heartbeat every 2s when connected
     if (deviceConnected && (now - lastHeartbeat >= 2000)) {
         lastHeartbeat = now;
         heartbeatCounter++;
@@ -185,17 +192,15 @@ void loop() {
         Serial.println("State: DISCONNECTED -> CONNECTED");
     }
 
-    // Re-start advertising every 30 seconds when not connected
+    // Re-start advertising every 30 seconds when not connected (safety net)
     if (!deviceConnected && (now - lastAdvRestart >= 30000)) {
         lastAdvRestart = now;
         NimBLEDevice::getAdvertising()->start();
         printTimestamp();
-        Serial.println("ADV: Re-started advertising (periodic refresh)");
+        Serial.println("ADV: Periodic advertising restart");
     }
 
-    // LED status indicator
-    // Connected: solid ON
-    // Advertising: slow blink (1s interval)
+    // LED status
     if (deviceConnected) {
         digitalWrite(LED_PIN, HIGH);  // Solid on when connected
     } else {
@@ -211,11 +216,11 @@ void loop() {
     if (now - lastMemReport >= 30000) {
         lastMemReport = now;
         printTimestamp();
-        Serial.printf("STATUS: heap=%d | connected=%s | heartbeats=%d | cores=%d\n",
+        Serial.printf("STATUS: heap=%d connected=%s heartbeats=%d uptime=%lus\n",
             ESP.getFreeHeap(),
             deviceConnected ? "YES" : "NO",
             heartbeatCounter,
-            ESP.getChipCores());
+            now / 1000);
     }
 
     delay(10);
