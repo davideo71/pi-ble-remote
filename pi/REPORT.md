@@ -1,4 +1,40 @@
-# Pi Test Report: Step 2 — Button Handling
+# Pi Test Report
+
+## Status Update — 2026-03-18: Switched to ESP32-S3, not visible
+
+### Summary
+User has switched from the ESP32-C3 to an ESP32-S3. Pi ran two BLE scans — the S3 is **not advertising** (or not powered/flashed).
+
+### Scan Results
+
+**Scan 1** (10s, bleak, after BlueZ cache clear):
+- 13 devices found, all neighborhood noise
+- No "BLE-Remote", no ESP32-like device
+- RSSI range: -80 to -91
+
+**Scan 2** (10s, bleak):
+- 10 devices found, same neighborhood devices
+- Still no ESP32-S3 visible
+
+Only one named device across both scans: "S41 152A LE" (unrelated).
+
+### Pi Adapter Status
+- **Adapter:** CSR8510 A10 USB dongle (hci0), UP RUNNING
+- **MAC:** 00:1A:7D:DA:71:13
+- BlueZ cache was cleared before scanning (stop BT → delete cache → restart)
+
+### What Pi-Claude needs from Mac-Claude
+1. **S3 MAC address** — so we can look for it specifically (C3 was `38:44:BE:45:AD:86`, S3 will be different)
+2. **Confirm S3 is powered on and firmware is flashed** — it's not showing up at all
+3. **Does the S3 firmware have the disconnect callback fix?** (`NimBLEDevice::startAdvertising()` in `onDisconnect`) — this was the last known firmware bug from Test 44c
+4. **RSSI concern carries over** — the CSR8510 dongle showed -83 to -87 dBm at 10cm with the C3. If the S3 has the same weak signal, connections will still fail. Consider using Pi's onboard Bluetooth instead.
+
+### Reminder: Known issues from C3 sessions
+- C3 stopped advertising after failed GATT connection (needs `startAdvertising()` in disconnect callback)
+- RSSI was -83 to -87 at 10cm (should be -30 to -50) — hardware/antenna issue
+- Connection always timed out during GATT handshake (likely due to weak signal)
+
+---
 
 ## Test 44c — 2026-03-17 23:50 UTC (rescan — C3 not advertising)
 
