@@ -27,7 +27,7 @@ from bleak.exc import BleakError
 BLEREMOTE_NAME       = "BLE-Remote"
 BLEREMOTE_SERVICE    = "4e520001-7354-4288-9a71-81a9bf56c4a8"
 BLEREMOTE_CHAR       = "4e520002-7354-4288-9a71-81a9bf56c4a8"
-BLEREMOTE_MAC        = "A0:F2:62:EC:51:CA"  # S3 SuperMini (base +2)
+BLEREMOTE_MAC        = "E8:F6:0A:36:79:30"  # C3 SuperMini (external antenna)
 
 # EasyPlay (S3, MicroPython) — Nordic UART Service
 EASYPLAY_NAME        = "EasyPlay"
