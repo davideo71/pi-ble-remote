@@ -4,11 +4,11 @@
  * v6 + deep sleep. Sleeps after idle timeout, wakes on any button press.
  *
  * GPIO (active LOW, INPUT_PULLUP — buttons wired to GND):
- *   GPIO 0 = Right
- *   GPIO 1 = On/Off
+ *   GPIO 0 = On/Off
+ *   GPIO 1 = Right
  *   GPIO 2 = Up
  *   GPIO 4 = Left
- *   GPIO 5 = Down
+ *   GPIO 3 = Down
  *
  * NeoPixel: GPIO 8
  *
@@ -50,11 +50,11 @@ struct Button {
 };
 
 Button buttons[] = {
-  { 0, 'R', 'r', "RIGHT",  false, 0 },
-  { 1, 'O', 'o', "ON/OFF", false, 0 },
+  { 0, 'O', 'o', "ON/OFF", false, 0 },
+  { 1, 'R', 'r', "RIGHT",  false, 0 },
   { 2, 'U', 'u', "UP",     false, 0 },
   { 4, 'L', 'l', "LEFT",   false, 0 },
-  { 5, 'D', 'd', "DOWN",   false, 0 },
+  { 3, 'D', 'd', "DOWN",   false, 0 },
 };
 const int NUM_BUTTONS = sizeof(buttons) / sizeof(buttons[0]);
 const unsigned long DEBOUNCE_MS = 50;
@@ -197,7 +197,7 @@ void enterDeepSleep() {
 
   // Wake on any button GPIO going LOW
   esp_deep_sleep_enable_gpio_wakeup(
-    (1ULL << 0) | (1ULL << 1) | (1ULL << 2) | (1ULL << 4) | (1ULL << 5),
+    (1ULL << 0) | (1ULL << 1) | (1ULL << 2) | (1ULL << 3) | (1ULL << 4),
     ESP_GPIO_WAKEUP_GPIO_LOW
   );
 
@@ -215,21 +215,22 @@ void setup() {
     pinMode(buttons[i].pin, INPUT_PULLUP);
   }
 
-  // Detect which button woke us (3 methods, first match wins)
+  // Detect which button woke us — skip GPIO 0 (strapping pin, falsely reads LOW on boot)
   if (wakeReason == ESP_SLEEP_WAKEUP_GPIO) {
     // Method 1: hardware latch
     for (int i = 0; i < NUM_BUTTONS; i++) {
+      if (buttons[i].pin == 0) continue;  // skip strapping pin
       if (!deferredWakeChar && (wakeGPIOs & (1ULL << buttons[i].pin))) {
         deferredWakeChar = buttons[i].downChar;
       }
     }
     // Method 2: read GPIOs directly (wire might still be touching)
     for (int i = 0; i < NUM_BUTTONS; i++) {
+      if (buttons[i].pin == 0) continue;  // skip strapping pin
       if (!deferredWakeChar && digitalRead(buttons[i].pin) == LOW) {
         deferredWakeChar = buttons[i].downChar;
       }
-      // Initialize prevPressed to actual state so we don't get
-      // phantom press/release events in the loop after wake
+      // Initialize prevPressed to actual state to avoid phantom events
       buttons[i].prevPressed = (digitalRead(buttons[i].pin) == LOW);
     }
   }
@@ -318,11 +319,18 @@ void loop() {
     piReady = false;
   }
 
-  // ── Deferred wake button: send from main loop once Pi is ready ──
+  // ── Deferred wake button: send press+release once Pi is ready ──
   if (piReady && deferredWakeChar && deviceConnected) {
-    Serial.printf("DEFERRED SEND: press='%c' (0x%02X)\n", deferredWakeChar, deferredWakeChar);
-    uint8_t pressData = (uint8_t)deferredWakeChar;
-    pTxChar->setValue(&pressData, 1);
+    char press = deferredWakeChar;
+    char release = press + 32;  // uppercase → lowercase (e.g. 'U' → 'u')
+    Serial.printf("DEFERRED SEND: press='%c' release='%c'\n", press, release);
+    uint8_t data;
+    data = (uint8_t)press;
+    pTxChar->setValue(&data, 1);
+    pTxChar->notify();
+    delay(50);
+    data = (uint8_t)release;
+    pTxChar->setValue(&data, 1);
     pTxChar->notify();
     deferredWakeChar = 0;
     piReady = false;
