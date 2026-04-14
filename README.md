@@ -73,6 +73,10 @@ arduino-cli compile --fqbn esp32:esp32:esp32c3 remote_c3_v7.ino
 arduino-cli upload --fqbn esp32:esp32:esp32c3 --port /dev/cu.usbmodem1101 remote_c3_v7.ino
 ```
 
+## Planned Features
+- **Safe shutdown**: Long-press On/Off (5s) to trigger `sudo shutdown -h now` on the Pi, avoiding SD card corruption from unplugging. Needs implementation in EasyPlay's button handler (5s hold timer on `O` press, trigger on late release). Won't conflict with remote's 10s LED mode toggle.
+- **3D printed enclosure**: STL file TBD.
+
 ## Repository Structure
 ```
 esp32/remote_c3_v7/   Current production firmware (v7, deep sleep + LED modes)
