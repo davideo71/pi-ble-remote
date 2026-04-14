@@ -1,0 +1,11 @@
+[Unit]
+Description=Set HDMI audio to Digital Surround 5.1
+After=pipewire.service wireplumber.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/david/bin/set-hdmi-surround.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target

@@ -50,7 +50,12 @@ The Pi 5 ignores legacy `hdmi_group`/`hdmi_mode` in config.txt. Use KMS cmdline 
 video=HDMI-A-1:1920x1080@60D
 ```
 
-### Set audio volume
+### Audio setup (critical for AC3/EAC3 files)
+VLC 3.0 + PipeWire has broken spdif passthrough. Fix documented in `pi/audio-setup/README.md`:
+1. Disable VLC spdif plugins (rename `.so` → `.so.disabled`)
+2. Install `~/bin/set-hdmi-surround.sh` boot script
+3. Enable `hdmi-surround.service` systemd user service
+
 ```bash
 # Set PipeWire system volume to 100% (use TV for volume control)
 wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0
@@ -72,6 +77,20 @@ EasyPlay runs as a systemd service (already enabled):
 sudo systemctl status easyplay    # check status
 sudo systemctl restart easyplay   # restart
 journalctl -u easyplay -f         # follow logs
+```
+
+### Remote access (Tailscale)
+Tailscale VPN installed on Pi for access from any network:
+- Pi Tailscale IP: `100.65.29.11`
+- Pi hostname: `luckypi`
+- Mac needs Tailscale installed and signed in to same account
+- Use `scp` (not `rsync`) for file transfers — thumb drive is FAT32
+
+### Mac companion tool
+`mac/easyplay_status.py` shows watch progress (in progress / completed / unwatched):
+```bash
+python3 mac/easyplay_status.py              # one-shot
+python3 mac/easyplay_status.py --refresh 30 # auto-refresh
 ```
 
 ## Flashing the Remote
