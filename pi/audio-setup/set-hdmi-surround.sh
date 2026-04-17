@@ -14,11 +14,25 @@
 sleep 10  # wait for PipeWire to fully start
 
 # Returns the sink ID of the first working HDMI sink, or empty if none.
-# "Working" means: a sink named "Built-in Audio" + profile suffix, NOT
-# the Dummy Output and NOT auto_null.
+# "Working" means: any sink whose description starts with "Built-in Audio"
+# (excludes Dummy Output / auto_null which doesn't have that prefix).
+# Matches all real variants: "Digital Stereo (HDMI)", "Digital Surround 5.1 (HDMI)",
+# "Pro 32", etc.
 find_working_sink() {
-    # Match either "Digital Surround" or "Stereo" variants
-    wpctl status 2>/dev/null | grep -oP '\d+(?=\. Built-in Audio (?:Digital Surround|Stereo))' | head -1
+    wpctl status 2>/dev/null | awk '
+        /^Audio/           {in_audio=1}
+        /^Video/ || /^Settings/ {in_audio=0}
+        in_audio && / Sinks:/ {in_sinks=1; next}
+        in_audio && /─/ && !/Sinks:/ {in_sinks=0}
+        in_sinks && /Built-in Audio/ {
+            match($0, /[0-9]+\./)
+            if (RSTART > 0) {
+                id = substr($0, RSTART, RLENGTH - 1)
+                print id
+                exit
+            }
+        }
+    '
 }
 
 # Apply a given profile number to every HDMI audio device, then wait
@@ -26,7 +40,8 @@ find_working_sink() {
 try_profile() {
     local profile=$1
     local label=$2
-    echo "Trying profile $profile ($label)..."
+    # Diagnostic output goes to stderr so only the sink ID is captured via $()
+    echo "Trying profile $profile ($label)..." >&2
     for DEV in $(wpctl status 2>/dev/null | grep -oP '\d+(?=\. Built-in Audio\s+\[alsa\])'); do
         wpctl set-profile $DEV $profile 2>/dev/null
     done
@@ -34,21 +49,22 @@ try_profile() {
     local sink
     sink=$(find_working_sink)
     if [ -n "$sink" ]; then
-        echo "  Got sink $sink with profile $profile ($label)"
+        echo "  Got sink $sink with profile $profile ($label)" >&2
         echo "$sink"
         return 0
     fi
     return 1
 }
 
-# Finalize a sink: set it as default, restart easyplay.
+# Finalize a sink: set it as default.
+# NOTE: Does NOT restart easyplay. The old v1 did, which caused dueling
+# easyplay instances when the watcher had already launched one. EasyPlay
+# picks up the default sink on its own next launch via the watcher.
 finalize() {
     local sink=$1
     wpctl set-default $sink 2>/dev/null
     wpctl set-volume $sink 1.0 2>/dev/null
-    # Restart easyplay so it connects to the correct sink
-    sudo systemctl restart easyplay 2>/dev/null || true
-    echo "Success: sink=$sink, easyplay restarted"
+    echo "Success: sink=$sink set as default"
 }
 
 # Main adaptive loop: a few attempts, each trying surround then stereo.
